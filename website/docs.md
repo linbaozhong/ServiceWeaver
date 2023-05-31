@@ -192,18 +192,22 @@ machine entirely. Here's a diagram illustrating this concept:
 
 组件是Service Weaver的核心抽象。Service Weaver应用程序中的所有代码都作为某个组件的一部分运行。组件的主要优点是它们将编写代码的方式与运行代码的方式分离开来。它们允许您将应用程序编写为一个整体，但是当您要运行代码时，您可以在单独的进程中或完全在不同的机器上运行组件。下面的图表说明了这个概念:
 
-![A diagram showing off various types of Service Weaver deployments](/assets/images/components.svg)
+![A diagram showing off various types of Service Weaver deployments](./assets/images/components.svg)
 
 When we `go run` a Service Weaver application, all components run together in a
 single process, and method calls between components are executed as regular Go
 method calls. In a moment, we'll describe how to run each component in a
 separate process with method calls between components executed as RPCs.
 
+当我们 `go run` 一个Service Weaver应用程序时，所有组件都在单个进程中一起运行，组件之间的方法调用作为常规的go方法调用执行。稍后，我们将描述如何在单独的进程中运行每个组件，并将组件之间的方法调用作为rpc执行。
+
 ## Multiple Components
 
 In a Service Weaver application, any component can call any other component. To
 demonstrate this, we introduce a second `Reverser` component. Create a file
 `reverser.go` with the following contents:
+
+在Service Weaver应用程序中，任何组件都可以调用任何其他组件。为了演示这一点，我们引入第二个 `Reverser` 组件。创建文件 `Reverser.go` 。内容如下:
 
 ```go
 package main
@@ -239,7 +243,11 @@ unsurprisingly, a `Reverse` method that reverses strings. The `reverser` struct
 is our implementation of the `Reverser` component (as indicated by the
 `weaver.Implements[Reverser]` field it contains).
 
+`Reverser`组件由一个`Reverser`接口表示，毫无疑问，它带有一个`Reverse`方法来反转字符串。`reverser` struct 是我们对 `Reverser` 组件的实现(如`weaver.Implements[Reverser]`所示)。
+
 Next, edit the app component in `main.go` to use the `Reverser` component:
+
+接下来，在 `main.go` 中编辑app组件去使用 `Reverser` 组件:
 
 ```go
 package main
@@ -278,12 +286,16 @@ func (app *app) Main(ctx context.Context) error {
 The `app` struct has a new field of type `weaver.Ref[Reverser]` that provides
 access to the `Reverser` component.
 
+`app` struct 有一个新的字段，类型为 `weaver.Ref[Reverser]` ，它提供了对 `Reverser` 组件的访问。
+
 In general, if component X uses component Y, the implementation struct for X
 should contain a field of type `weaver.Ref[Y]`. When an X component instance is
 created, Service Weaver will automatically create the Y component as well and
 will fill the `weaver.Ref[Y]` field with a handle to the Y component.  The
 implementation of X can call `Get()` on the `weaver.Ref[Y]` field to get the Y
 component, as demonstrated by the following lines in the preceding examples:
+
+通常，如果组件X使用组件Y，则X的struct实现应该包含类型为 `weaver.Ref[Y]` 的字段。当创建X组件实例时，Service Weaver也将自动创建Y组件并填充 `weaver.Ref[Y]` 字段和Y组件的句柄。X的实现可以在 `weaver.Ref[Y]` 上调用Get()方法获取Y组件，如前面示例中的以下行所示:
 
 ```go
     var r Reverser = app.reverser.Get()
@@ -295,6 +307,8 @@ component, as demonstrated by the following lines in the preceding examples:
 Service Weaver is designed for writing serving systems. In this section, we'll
 augment our app to serve HTTP traffic using a network listener. Rewrite
 `main.go` with the following contents:
+
+Service Weaver是为编写服务系统而设计的。在本节中，我们将扩展我们的应用程序，使用网络侦听器来提供HTTP访问。用以下内容重写`main.go`:
 
 ```go
 package main
@@ -347,19 +361,26 @@ func (app *app) Main(ctx context.Context) error {
 
 Here's an explanation of the code:
 
+下面是对代码的解释：
+
 - `app.Listener(...)` returns a network listener, similar to
   [`net.Listen`][net_listen]. With Service Weaver, listeners are named. In this
   case, we name the listener `"hello"`. A `weaver.ListenerOptions` configures
   the listener. Here, we specify that the listener should listen on address
   `localhost:12345`.
+- 返回一个网络监听器，类似于[`net.Listen`][net_listen]。在Service Weaver中，监听器被命名。在本例中，我们将侦听器命名为“hello”并使用`weaver.ListenerOptions` 配置侦听器。在这里，我们指定侦听器应该侦听地址`localhost:12345`。
 - `http.HandleFunc(...)` registers an HTTP handler for the `/hello?name=<name>`
   endpoint that returns a reversed greeting by calling the `Reverser.Reverse`
   method.
+- `http.HandleFunc(...)` 为`/hello?name=<name>`注册一个HTTP处理程序，通过调用 `Reverser.Reverse` 返回反转的问候语。
 - `http.Serve(lis, nil)` runs the HTTP server on the provided listener.
+- `http.Serve(lis, nil)` 在提供的侦听器上运行HTTP服务器。
 
 Run `go mod tidy` and then `go run .`. The program should print out the name of
 the application and a unique deployment id. It should then block serving HTTP
 requests on `localhost:12345`.
+
+运行 `go mod tidy` ，然后 `go run .`。程序应该打印出应用程序的名称和唯一的部署id。然后，它应该阻塞在`localhost:12345`上提供HTTP请求。
 
 ```console
 $ go mod tidy
@@ -374,6 +395,8 @@ hello listener available on 127.0.0.1:12345
 
 In a separate terminal, curl the server to receive a reversed greeting:
 
+在一个另外的终端上，curl服务器接收一个反向的问候语:
+
 ```console
 $ curl "localhost:12345/hello?name=Weaver"
 Hello, revaeW!
@@ -381,6 +404,8 @@ Hello, revaeW!
 
 Run `weaver single status` to view the status of the Service Weaver application.
 The status shows every deployment, component, and listener.
+
+运行`weaver single status`查看Service weaver应用程序的状态。状态显示每个部署、组件和侦听器。
 
 ```console
 $ weaver single status
@@ -409,6 +434,8 @@ $ weaver single status
 ```
 
 You can also run `weaver single dashboard` to open a dashboard in a web browser.
+
+你也可以运行 `weaver single dashboard` 在web浏览器中打开一个仪表板。
 
 ## Multiprocess Execution
 
