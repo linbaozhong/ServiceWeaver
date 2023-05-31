@@ -192,7 +192,7 @@ machine entirely. Here's a diagram illustrating this concept:
 
 组件是Service Weaver的核心抽象。Service Weaver应用程序中的所有代码都作为某个组件的一部分运行。组件的主要优点是它们将编写代码的方式与运行代码的方式分离开来。它们允许您将应用程序编写为一个整体，但是当您要运行代码时，您可以在单独的进程中或完全在不同的机器上运行组件。下面的图表说明了这个概念:
 
-![A diagram showing off various types of Service Weaver deployments](./assets/images/components.svg)
+![A diagram showing off various types of Service Weaver deployments](assets/images/components.svg)
 
 When we `go run` a Service Weaver application, all components run together in a
 single process, and method calls between components are executed as regular Go
@@ -395,7 +395,7 @@ hello listener available on 127.0.0.1:12345
 
 In a separate terminal, curl the server to receive a reversed greeting:
 
-在一个另外的终端上，curl服务器接收一个反向的问候语:
+在另外一个终端上，curl服务器接收一个反向的问候语:
 
 ```console
 $ curl "localhost:12345/hello?name=Weaver"
@@ -444,6 +444,9 @@ run`. Now, we'll run our application in multiple processes, with method calls
 between components executed as RPCs. First, create a [TOML](https://toml.io)
 config file named `weaver.toml` with the following contents:
 
+我们已经看到了如何使用 `go
+run`在单个进程中运行Service Weaver应用程序。现在，我们将在多个进程中运行应用程序，组件之间的方法调用作为rpc执行。首先，创建一个名为 `weaver.toml` 的 [TOML](https://toml.io) 配置文件。内容如下:
+
 ```toml
 [serviceweaver]
 binary = "./hello"
@@ -451,6 +454,8 @@ binary = "./hello"
 
 This config file specifies the binary of the Service Weaver application. Next,
 build and run the app using `weaver multi deploy`:
+
+这个配置文件指定Service Weaver应用程序的二进制文件。接下来，使用“weaver multi deploy”构建并运行应用:
 
 ```console
 $ go build                        # build the ./hello binary
@@ -467,7 +472,12 @@ S1205 10:21:15.454387 stdout  88639bf8] hello listener available on 127.0.0.1:12
 two log entries. We elaborate on replication more in the
 [Components](#components) section later.
 
+**注意**:`weaver multi` 将每个组件复制两次，这就是为什么您看到两个日志条目。我们在
+[Components](#components) 小节详细说明。
+
 In a separate terminal, curl the server:
+
+在另外一个终端上，curl服务器：
 
 ```console
 $ curl "localhost:12345/hello?name=Weaver"
@@ -481,9 +491,13 @@ ran `weaver generate`, the Service Weaver code generator? One thing that `weaver
 generate` does is generate RPC clients and servers for every component to make
 this communication possible.
 
+当主组件接收到你的`/hello` HTTP请求时，它调用`reverser.Reverse`方法。此方法调用作为RPC执行到在不同进程中运行的 `Reverser` 组件。还记得前面我们运行 `weaver generate` (Service weaver代码生成器)的时候吗? `weaver generate`所做的一件事是为每个组件生成RPC客户端和服务器，以使这种通信成为可能。
+
 Run `weaver multi status` to view the status of the Service Weaver application.
 Note that the `main` and `Reverser` components are replicated twice, and every
 replica is run in its own OS process.
+
+运行 `weaver multi status` 查看Service weaver应用程序的状态。请注意， `main` 组件和 `Reverser` 组件被复制两次，并且每个副本都在其自己的操作系统进程中运行。
 
 ```console
 $ weaver multi status
@@ -512,6 +526,8 @@ $ weaver multi status
 ```
 
 You can also run `weaver multi dashboard` to open a dashboard in a web browser.
+
+您还可以运行 `weaver multi dashboard` 在web浏览器中打开仪表板。
 
 ## Deploying to the Cloud
 
@@ -566,6 +582,8 @@ Concretely, a component is represented as a Go interface and corresponding
 implementation of that interface. Consider the following `Adder` component for
 example:
 
+**组件**是Service Weaver的核心抽象。组件是一个持久的、可能被复制的实体，它公开了一组方法。具体地说，组件被表示为Go接口和该接口的相应实现。以下Adder组件为例:
+
 ```go
 type Adder interface {
     Add(context.Context, int, int) (int, error)
@@ -588,12 +606,16 @@ invoke the component's methods as you would any regular Go method. When you
 invoke a component's method, the method call is performed by one of the possibly
 many component replicas.
 
+`Adder` 定义组件的接口， `adder` 定义组件的实现。两者以嵌入 `weaver.Implements[Adder]`字段相连接。你可以在客户端调用 `weaver.Ref[Adder].Get()` 获取到Adder组件。返回的客户机实现组件的接口，因此您可以像调用任何常规Go方法一样调用组件的方法。当您调用组件的方法时，该方法调用将由可能存在的多个组件副本中的一个执行。
+
 Components are generally long-lived, but the Service Weaver runtime may scale up
 or scale down the number of replicas of a component over time based on load.
 Similarly, component replicas may fail and get restarted. Service Weaver may
 also move component replicas around, co-locating two chatty components in the
 same OS process, for example, so that communication between the components is
 done locally rather than over the network.
+
+组件通常是持久存活的，但是Service Weaver运行时可能会根据负载随时间增加或减少组件的副本数量。类似地，组件副本可能会失败并重新启动。Service Weaver还可以移动组件副本，例如，将两个聊天组件放在同一个操作系统进程中，这样组件之间的通信就可以在本地完成，而不是通过网络。
 
 When invoking a component's method, be prepared that it may be executed via
 a remote procedure call. As a result, your call may fail with a network error
@@ -602,12 +624,16 @@ you can explicitly place the two components in the same
 [colocation group](#config-files), ensuring that they always run in the
 same OS process.
 
+当调用组件的方法时，它可能会通过远程过程调用执行。因此，您的调用可能会因为网络错误而不是应用程序错误而失败。如果不想处理网络错误，可以显式地将这两个组件放在同一个主机托管[colocation group](#config-files) 中，确保它们始终在同一个操作系统进程中运行。
+
 ## Interfaces
 
 Every method in a component interface must receive a `context.Context` as its
 first argument and return an `error` as its final result. All other arguments
 must be [serializable](#serializable-types). These are all valid component
 methods:
+
+组件接口中的每个方法都必须接收`context.Context`作为它的第一个参数，并返回一个 `error` 作为它的最终结果。所有其他参数必须是 [serializable](#serializable-types)的。这些都是有效的组件方法:
 
 ```go
 a(context.Context) error
@@ -617,6 +643,8 @@ d(context.Context, int) (int, error)
 ```
 
 These are all *invalid* component methods:
+
+这些都是无效的组件方法:
 
 ```go
 a() error                          // no context.Context argument
@@ -630,6 +658,8 @@ e(context.Context, chan int) error // chan int isn't serializable
 
 A component implementation must be a struct that looks like:
 
+组件实现必须是一个结构体，如下所示:
+
 ```go
 type foo struct{
     weaver.Implements[Foo]
@@ -638,15 +668,21 @@ type foo struct{
 ```
 
 -   It must be a struct.
+- 它必须是一个结构体。
 -   It must embed a `weaver.Implements[T]` field where `T` is the component
     interface it implements.
+- 它必须嵌入一个 `weaver.Implements[T]` 字段，其中T是它实现的组件接口。
 
 `weaver.Implements[T]` implements the `weaver.Instance` interface and therefore
 every component implementation (including `foo`) also implements
 `weaver.Instance`.
 
+`weaver.Implements[T]` 实现 `weaver.Instance` 实例接口，因此每个组件实现(包括`foo`)也实现了`weaver.Instance`。
+
 If a component implementation implements an `Init(context.Context) error`
 method, it will be called when an instance of the component is created.
+
+如果组件实现实现了 `Init(context.Context) error`方法，它将在创建组件实例时被调用。
 
 ```go
 func (f *foo) Init(context.Context) error {
@@ -658,12 +694,21 @@ func (f *foo) Init(context.Context) error {
 
 When implementing a component, there are three semantic details to keep in mind:
 
+在实现组件时，需要记住三个语义细节:
+
 1.  A component's state is not persisted.
 2.  A component's methods may be invoked concurrently.
 3.  There may be multiple replicas of a component.
 
+
+1. 组件的状态不会被持久化。
+2. 组件的方法可以并发调用。
+3. 一个组件可能有多个副本。
+
 Take the following `Cache` component for example, which maintains an in-memory
 key-value cache.
+
+以下面的 `Cache` 组件为例，它维护内存中的键值缓存。
 
 ```go
 type Cache interface {
@@ -692,6 +737,8 @@ func (c *Cache) Get(_ context.Context, key string) (string, error) {
 
 Noting the points above:
 
+注意到以上几点:
+
 1.  A `Cache`'s state is not persisted, so if a `Cache` replica fails, its data
     is lost. Any state that needs to be persisted should be persisted
     explicitly.
@@ -702,9 +749,16 @@ Noting the points above:
     another client's `Put`. For this example, this means that the `Cache` has
     [weak consistency][weak_consistency].
 
+
+1. `Cache`的状态不是持久化的，所以如果`Cache`副本失败了，它的数据将被丢弃。任何需要持久化的状态都应该显式持久化。
+2. `Cache`的方法可能被并发调用，所以我们必须用互斥锁mu保护对`data`的访问
+3. `Cache`组件可能有多个副本，因此不能保证一个客户机的 `Get` 将被路由到与另一个客户机的`Put`相同的副本。对于本例，这意味着缓存具有弱一致性。
+
 If a remote method call fails to execute properly&mdash;because of a machine
 crash or a network partition, for example&mdash;it returns an error with an
 embedded `weaver.RemoteCallError`. Here's an illustrative example:
+
+如果远程方法调用无法正常执行(例如，由于机器崩溃或网络分区)，它将返回一个带有嵌入式 `weaver.RemoteCallError`的错误。这里有一个说明性的例子:
 
 ```go
 // Call the cache.Get method.
@@ -725,11 +779,15 @@ method calls that result in a `weaver.RemoteCallError`. Ensuring that all
 methods are either read-only or idempotent is one way to ensure safe retries,
 for example. Service Weaver does not automatically retry method calls that fail.
 
+请注意，如果方法调用返回带有嵌入式`weaver.RemoteCallError`的错误，这并不意味着该方法从未执行过。该方法可能已部分或全部执行。因此，您必须小心重试导致 `weaver.RemoteCallError`的方法调用。确保所有方法都是只读或幂等的是确保安全重试的一种方法。Service Weaver不会自动重试失败的方法调用。
+
 ## Config
 
 Service Weaver uses [config files](#config-files), written in [TOML](#toml), to
 configure how applications are run. A minimal config file, for example, simply
 lists the application binary:
+
+Service Weaver使用用 [config files](#config-files) 编写 [TOML](#toml) 配置文件来配置应用程序的运行方式。例如，一个最小的配置文件只是列出了应用程序的二进制文件:
 
 ```toml
 [serviceweaver]
@@ -739,6 +797,8 @@ binary = "./hello"
 A config file may additionally contain component-specific configuration
 sections, which allow you to configure the components in your application. For
 example, consider the following `Greeter` component.
+
+配置文件可能还包含特定于组件的配置部分，这些部分允许您配置应用程序中的组件。例如，参考以下的Greeter组件。
 
 ```go
 type Greeter interface {
@@ -757,6 +817,8 @@ func (g *greeter) Greet(_ context.Context, name string) (string, error) {
 Rather than hard-coding the greeting `"Hello"`, we can provide a greeting in a
 config file. First, we define a options struct.
 
+我们可以在配置文件中提供问候语，而不是硬编码 `"Hello"`。首先，我们定义一个options结构体。
+
 ```go
 type greeterOptions struct {
     Greeting string
@@ -765,6 +827,8 @@ type greeterOptions struct {
 
 Next, we associate the options struct with the `greeter` implementation by
 embedding the `weaver.WithConfig[T]` struct.
+
+接下来，我们通过嵌入 `weaver.WithConfig[T]` struct与带有`greeter`实现的options struct联系起来。
 
 ```go
 type greeter struct {
@@ -776,6 +840,8 @@ type greeter struct {
 Now, we can add a `Greeter` section to the config file. The section is keyed by
 the full path-prefixed name of the component.
 
+现在，我们可以在配置文件中添加一个 `Greeter` 部分。该部分由组件的完整路径前缀名称作为关键字。
+
 ```toml
 ["example.com/mypkg/Greeter"]
 Greeting = "Bonjour"
@@ -785,6 +851,8 @@ When the `Greeter` component is created, Service Weaver will automatically parse
 the `Greeter` section of the config file into a `greeterOptions` struct. You can
 access the populated struct via the `Config` method of the embedded `WithConfig`
 struct. For example:
+
+创建 `Greeter` 组件时，Service Weaver会自动将配置文件中的 `Greeter` 部分解析为 `greeterOptions` struct。您可以通过嵌入的`WithConfig` struct的 `Config` 方法访问填充的结构体。例如:
 
 ```go
 func (g *greeter) Greet(_ context.Context, name string) (string, error) {
@@ -803,6 +871,8 @@ func (g *greeter) Greet(_ context.Context, name string) (string, error) {
 If you run an application directly (i.e. using `go run`), you can pass the
 config file using the `SERVICEWEAVER_CONFIG` environment variable:
 
+如果你直接运行应用程序(即使用 `go run`)，你可以使用 `SERVICEWEAVER_CONFIG` 环境变量传递配置文件:
+
 ```console
 $ SERVICEWEAVER_CONFIG=weaver.toml go run .
 ```
@@ -820,8 +890,12 @@ integrates the logs into the environment where your application is deployed. If
 you [deploy a Service Weaver application to Google Cloud](#gke), for example,
 logs are automatically exported to [Google Cloud Logging][cloud_logging].
 
+Service Weaver提供了一个日志API `weaver.Logger`。通过使用Service Weaver的日志API，您可以记录、跟踪、搜索和过滤来自每个Service Weaver应用程序(过去或现在)的日志。Service Weaver还将日志集成到部署应用程序的环境中。例如，如果您将Service Weaver应用程序部署到Google Cloud，则日志将自动导出到Google Cloud Logging。
+
 Use the `Logger` method of a component implementation to get a logger scoped to
 the component. For example:
+
+使用组件实现的 `Logger` 方法来获取组件范围内的日志记录器。例如:
 
 ```go
 type Adder interface {
@@ -844,6 +918,8 @@ func (a *adder) Add(_ context.Context, x, y int) (int, error) {
 
 Logs look like this:
 
+日志像这样的:
+
 ```console
 D1103 08:55:15.650138 main.Adder 73ddcd04 adder.go:12] A debug log.
 I1103 08:55:15.650149 main.Adder 73ddcd04 adder.go:13] An info log.
@@ -857,8 +933,12 @@ components are co-located in the same OS process, they are given the same node
 id. Then comes the file and line where the log was produced, followed finally by
 the contents of the log.
 
+日志行的第一个字符表示该日志是[D]ebug、[I] info还是[E] error日志条目。然后是MMDD格式的日期，后面跟着时间。然后是组件名和逻辑节点id。如果两个组件位于同一操作系统进程中，则为它们分配相同的节点id。然后是生成日志的文件和行，最后是日志的内容。
+
 Service Weaver also allows you to attach key-value attributes to log entries.
 These attributes can be useful when searching and filtering logs.
+
+Service Weaver还允许您将键值属性附加到日志条目。这些属性在搜索和过滤日志时非常有用。
 
 ```go
 logger.Info("A log with attributes.", "foo", "bar")  // adds foo="bar"
@@ -866,6 +946,8 @@ logger.Info("A log with attributes.", "foo", "bar")  // adds foo="bar"
 
 If you find yourself adding the same set of key-value attributes repeatedly, you
 can pre-create a logger that will add those attributes to all log entries:
+
+如果你发现自己反复添加相同的键值属性集，你可以预先创建一个记录器，将这些属性添加到所有日志条目:
 
 ```go
 fooLogger = logger.With("foo", "bar")
@@ -877,6 +959,8 @@ will be captured and logged by Service Weaver, but they won't be associated with
 a particular component, they won't have `file:line` information, and they won't
 have any attributes, so we recommend you use a `weaver.Logger` whenever
 possible.
+
+**注意**:您还可以在代码中添加普通的打印语句。这些打印将被Service Weaver捕获和记录，但它们不会与特定的组件相关联，它们不会有 `file:line` 信息，也不会有任何属性，因此我们建议您使用 `weaver.Logger` 。
 
 ```console
 S1027 14:40:55.210541 stdout d772dcad] This was printed by fmt.Println
@@ -1149,6 +1233,8 @@ arbitrarily. It is sometimes beneficial for method invocations to be routed to
 example, consider a `Cache` component that maintains an in-memory cache in front
 of an underlying disk-backed key-value store:
 
+默认情况下，当客户端调用远程组件的方法时，该方法调用将由任意选择的多个组件副本之一执行。根据提供给方法的参数将方法调用路由到*特定的*副本有时是有益的。例如，考虑一个 `Cache` 组件，它在底层磁盘支持的键值存储前面维护内存中的缓存:
+
 ```go
 type Cache interface {
     Get(ctx context.Context, key string) (string, error)
@@ -1166,6 +1252,8 @@ key to the same replica. Service Weaver supports this affinity based routing by 
 the application to specify a router type associated with the component
 implementation. For example:
 
+为了提高缓存命中率，我们可能希望将对给定键的每个请求路由到相同的副本。Service Weaver通过允许应用程序指定与组件实现相关联的路由器类型来支持这种基于关联的路由。例如:
+
 ```go
 type cacheRouter struct{}
 func (cacheRouter) Get(_ context.Context, key string) string { return key }
@@ -1179,7 +1267,11 @@ method is invoked, its corresponding router method is invoked to produce a
 routing key. Method invocations that produce the same key are routed to the same
 replica.
 
+对于每个需要路由的组件方法(例如`Get`和`Put`)，路由器类型应该实现一个等价的方法(例如，相同的名称和参数类型)，其返回类型是路由键。当一个组件的路由方法被调用时，它对应的路由器方法被调用来产生一个路由密钥。产生相同键的方法调用被路由到相同的副本。
+
 A routing key can be
+
+路由密钥可以是
 
 -   any integer (e.g., `int`, `int32`), float (i.e. `float32`, `float64`), or
     string; or
@@ -1189,6 +1281,8 @@ A routing key can be
 Every router method must return the same routing key type. The following, for
 example, is invalid:
 
+每个路由器方法必须返回相同的路由密钥类型。例如:
+
 ```go
 // ERROR: Get returns a string, but Put returns an int.
 func (cacheRouter) Get(_ context.Context, key string) string { return key }
@@ -1197,6 +1291,8 @@ func (cacheRouter) Put(_ context.Context, key, value string) int { return 42 }
 
 To associate a router with its component, embed a `weaver.WithRouter[T]` field in
 the component implementation where `T` is the type of the router.
+
+要将路由器与其组件关联，需要嵌入一个 `weaver.WithRouter[T]` 字段，其中T是路由器的类型。
 
 ```go
 type cache struct {
@@ -1211,9 +1307,13 @@ method invocations with the same key to the same replica, but this is *not*
 guaranteed. As a corollary, you should *never* depend on routing for
 correctness. Only use routing to increase performance in the common case.
 
+**注意**:路由是在尽力而为的基础上完成的。Service Weaver将尝试将具有相同键的方法调用路由到相同的副本，但这*不能*保证。因此，*永远*不应该依赖路由的正确性。在一般情况下，只使用路由来提高性能。
+
 Also note that if a component invokes a method on a co-located component, the
 method call will always be executed by the co-located component and won't be
 routed.
+
+还要注意的是，如果组件调用位于同一位置的组件上的方法，则该方法调用将始终由位于同一位置的组件执行，而不会被路由。
 
 # Storage
 
@@ -1221,14 +1321,20 @@ We expect most Service Weaver applications to persist their data in some way. Fo
 example, an e-commerce application may store its products catalog and user
 information in a database and access them while serving user requests.
 
+我们期望大多数Service Weaver应用程序以某种方式持久化它们的数据。例如，电子商务应用程序可以将其产品目录和用户信息存储在数据库中，并在服务用户请求时访问它们。
+
 By default, Service Weaver leaves the storage and retrieval of application data
 up to the developer. If you're using a database, for example, you have to create
 the database, pre-populate it with data, and write the code to access the
 database from your Service Weaver application.
 
+默认情况下，Service Weaver将应用程序数据的存储和检索留给开发人员。例如，如果您正在使用数据库，则必须创建数据库，用数据预先填充它，并编写代码以从Service Weaver应用程序访问数据库。
+
 Below is an example of how database information can be passed to a simple
 `Adder` component using a [config file](#components-config). First, the config
 file:
+
+下面是如何使用配置文件将数据库信息传递给简单的`Adder`组件的示例。首先，配置文件:
 
 ```toml
 ["example.com/mypkg/Adder"]
@@ -1278,6 +1384,8 @@ func (a *Adder) Add(ctx context.Context, x, y int) (int, error) {
 
 A similar process can be followed to pass database information using Go flags or
 environment variables.
+
+可以遵循类似的方式来使用Go flags 或环境变量传递数据库信息。
 
 # Testing
 
