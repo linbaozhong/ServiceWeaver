@@ -2,12 +2,14 @@
 TODO: Link to code snippets to make sure they are compilable and runnable.
 </div>
 
-# What is Service Weaver?
+# What is Service Weaver? 
 
 Service Weaver is a programming framework for writing, deploying, and managing
 distributed applications. You can run, test, and debug a Service Weaver application
 locally on your machine, and then deploy the application to the cloud with a
 single command.
+
+Service Weaver是一个用于编写、部署和管理分布式应用程序的编程框架。您可以在本地机器上运行、测试和调试Service Weaver应用程序，然后使用一个命令将应用程序部署到云中。
 
 ```console
 $ go run .                      # Run locally.
@@ -22,6 +24,8 @@ to write any networking or serialization code; you just write Go. Service Weaver
 also provides libraries for logging, metrics, tracing, routing, testing, and
 more.
 
+Service Weaver应用程序由许多组件组成。组件表现为常规的Go接口，组件通过调用这些接口定义的方法来相互交互。这使得编写Service Weaver应用程序变得容易。您不需要编写任何网络或序列化代码;你只要写Go。Service Weaver还提供了用于日志记录、计量、跟踪、路由、测试等的库。
+
 You can deploy a Service Weaver application as easily as running a single command. Under
 the covers, Service Weaver will dissect your binary along component boundaries, allowing
 different components to run on different machines. Service Weaver will replicate,
@@ -30,14 +34,20 @@ manage all the networking details on your behalf, ensuring that different
 components can communicate with each other and that clients can communicate with
 your application.
 
+您可以像运行单个命令一样轻松地部署Service Weaver应用程序。在幕后，Service Weaver将沿着组件边界剖析您的二进制文件，允许不同的组件在不同的机器上运行。Service Weaver将为您复制、自动伸缩和共同定位这些分布式组件。它还将代表您管理所有网络细节，确保不同的组件可以相互通信，并且客户端可以与您的应用程序通信。
+
 Refer to the [Installation](#installation) section to install Service Weaver on
 your machine, or read the [Step by Step Tutorial](#step-by-step-tutorial)
 section for a tutorial on how to write Service Weaver applications.
+
+请参阅 [Installation](#installation) 部分，在您的机器上安装Service Weaver，或者阅读 [Step by Step Tutorial](#step-by-step-tutorial)部分，了解如何编写Service Weaver应用程序。
 
 # Installation
 
 Ensure you have [Go installed][go_install], version 1.20 or higher. Then, run
 the following to install the `weaver` command:
+
+确保你已经 [Go installed][go_install]，版本1.20或更高。然后，执行如下命令安装weaver命令:
 
 ```console
 $ go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
@@ -48,11 +58,15 @@ $ go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
 accomplish this, for example, by adding the following to your `.bashrc` and
 running `source ~/.bashrc`:
 
+`go install` 将`weaver`命令安装到`$GOBIN`中，默认为`$GOPATH/bin`。确保这个目录包含在您的`PATH`中。你可以做到这一点，例如，通过在你的`.bashrc`中添加以下代码并运行`source ~/.bashrc`:
+
 ```console
 $ export PATH="$PATH:$GOPATH/bin"
 ```
 
 If the installation was successful, you should be able to run `weaver --help`:
+
+如果安装成功，您应该能够运行`weaver --help`:
 
 ```console
 $ weaver --help
@@ -67,6 +81,8 @@ USAGE
 **Note**: For GKE deployments you should also install the `weaver gke` command
 (see the [GKE](#gke) section for details):
 
+**注意**:对于GKE部署，您还应该安装`weaver gke`命令(有关详细信息，请参阅 [GKE](#gke) 部分):
+
 ```console
 $ go install github.com/ServiceWeaver/weaver-gke/cmd/weaver-gke@latest
 ```
@@ -74,6 +90,9 @@ $ go install github.com/ServiceWeaver/weaver-gke/cmd/weaver-gke@latest
 **Note**: If you run into issues installing `weaver` and `weaver gke` commands on
 macOS, you may want to prefix the install command with `export CGO_ENABLED=1; export CC=gcc`.
 For example:
+
+**注意**:如果你在macOS上安装`weaver`和`weaver gke`命令时遇到问题，你可能需要在install命令前加上`export CGO_ENABLED=1; export CC=gcc`。例如:
+
 ```console
 $ export CGO_ENABLED=1; export CC=gcc; go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
 ```
@@ -85,6 +104,8 @@ install Service Weaver and follow along, refer to the
 [Installation](#installation) section. The full source code presented in this
 tutorial can be found [here][hello_app].
 
+在本节中，我们将向您展示如何编写`Service Weaver`应用程序。要安装`Service Weaver`并遵循本教程，请参阅 [Installation](#installation) 部分。本教程中提供的完整源代码可以在 [here][hello_app]找到。
+
 ## Components
 
 Service Weaver's core abstraction is the **component**. A component is like an
@@ -93,8 +114,12 @@ components. Concretely, a component is represented with a regular Go
 [interface][go_interfaces], and components interact with each other by calling
 the methods defined by these interfaces.
 
+Service Weaver的核心抽象是组件。组件就像一个参与者，Service Weaver应用程序是由一组组件实现的。具体地说，组件用一个常规的Go接口表示，组件通过调用这些接口定义的方法来相互交互。
+
 In this section, we'll define a simple `hello` component that just prints
 a string and returns. First, run `go mod init hello` to create a go module.
+
+在本节中，我们将定义一个简单的`hello`组件，它只打印字符串并返回。首先，运行go mod init hello创建一个go模块。
 
 ```console
 $ mkdir hello/
@@ -103,6 +128,8 @@ $ go mod init hello
 ```
 
 Then, create a file called `hello.go` with the following contents:
+
+然后，创建一个名为 `hello.go` 的文件。内容如下:
 
 ```go
 package main
@@ -139,11 +166,15 @@ particular, `weaver.Run` finds the main component, creates it, and calls its
 Main method. In this example,`app` is the main component since it
 contains a `weaver.Implements[weaver.Main]` field.
 
+`weaver.Run` 初始化并运行Service Weaver应用程序。尤其是，`weaver.Run` 找到主组件，创建它，并调用它的 Main 方法。在这个例子中，`app`是主要组件，因为它包含了一个 `weaver.Implements[weaver.Main]` 域。
+
 Before we build and run the app, we need to run Service Weaver's code generator,
 called `weaver generate`. `weaver generate` writes a `weaver_gen.go` file that
 contains code needed by the Service Weaver runtime. We'll elaborate on what
 exactly `weaver generate` does and why we need to run it later. Finally, run the
 app!
+
+在构建和运行应用程序之前，我们需要运行Service Weaver的代码生成器，称为 `weaver generate`。 `weaver generate`写入一个包含Service Weaver运行时所需的代码的文件 `weaver_gen.go` 。我们将详细说明`weaver generate`究竟做了什么，以及为什么稍后需要运行它。最后，运行应用程序!
 
 ```console
 $ go mod tidy
@@ -159,7 +190,9 @@ your code. They let you write your application as a monolith, but when you go to
 run your code, you can run components in a separate process or on a different
 machine entirely. Here's a diagram illustrating this concept:
 
-![A diagram showing off various types of Service Weaver deployments](assets/images/components.svg)
+组件是Service Weaver的核心抽象。Service Weaver应用程序中的所有代码都作为某个组件的一部分运行。组件的主要优点是它们将编写代码的方式与运行代码的方式分离开来。它们允许您将应用程序编写为一个整体，但是当您要运行代码时，您可以在单独的进程中或完全在不同的机器上运行组件。下面的图表说明了这个概念:
+
+![A diagram showing off various types of Service Weaver deployments](/assets/images/components.svg)
 
 When we `go run` a Service Weaver application, all components run together in a
 single process, and method calls between components are executed as regular Go
