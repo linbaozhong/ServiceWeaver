@@ -1,5 +1,5 @@
 [serviceweaver]
-binary = "./hello"
+binary = "./hello.exe"
 
 [gke]
 regions = ["us-west1"]

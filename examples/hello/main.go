@@ -23,7 +23,9 @@ import (
 )
 
 func main() {
-	if err := weaver.Run(context.Background()); err != nil {
+	if err := weaver.Run[*app](context.Background(), func(ctx context.Context, a *app) error {
+		return a.Main(ctx)
+	}); err != nil {
 		log.Fatal(err)
 	}
 }

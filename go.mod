@@ -3,7 +3,7 @@ module github.com/ServiceWeaver/weaver
 go 1.20
 
 require (
-	github.com/BurntSushi/toml v1.2.0
+	github.com/BurntSushi/toml v1.3.0
 	github.com/DataDog/hyperloglog v0.0.0-20220214164406-974598347557
 	github.com/alecthomas/chroma/v2 v2.2.0
 	github.com/fsnotify/fsnotify v1.5.4
@@ -18,17 +18,17 @@ require (
 	github.com/yuin/goldmark v1.4.15
 	github.com/yuin/goldmark-highlighting/v2 v2.0.0-20220924101305-151362477c87
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.39.0
-	go.opentelemetry.io/otel v1.13.0
+	go.opentelemetry.io/otel v1.16.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.7.0
 	go.opentelemetry.io/otel/sdk v1.11.1
-	go.opentelemetry.io/otel/trace v1.13.0
-	golang.org/x/exp v0.0.0-20230510235704-dd950f8aeaea
+	go.opentelemetry.io/otel/trace v1.16.0
+	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
 	golang.org/x/image v0.5.0
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211
 	golang.org/x/tools v0.2.0
 	google.golang.org/genproto v0.0.0-20221109142239-94d6d90a7d66
-	google.golang.org/protobuf v1.28.1
+	google.golang.org/protobuf v1.30.0
 	modernc.org/sqlite v1.21.0
 )
 
@@ -39,13 +39,13 @@ require (
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/dustin/randbo v0.0.0-20140428231429-7f1b564ca724 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
-	github.com/go-logr/logr v1.2.3 // indirect
+	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
-	go.opentelemetry.io/otel/metric v0.36.0 // indirect
+	go.opentelemetry.io/otel/metric v1.16.0 // indirect
 	golang.org/x/mod v0.6.0 // indirect
 	golang.org/x/sys v0.1.0 // indirect
 	golang.org/x/text v0.7.0 // indirect
