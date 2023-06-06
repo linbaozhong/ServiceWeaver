@@ -15,50 +15,57 @@ package main
 
 import (
 	"context"
+	"examples/hello/routers"
 	"fmt"
-	"log"
-	"net/http"
-
 	"github.com/ServiceWeaver/weaver"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 func main() {
-	if err := weaver.Run[*app](context.Background(), func(ctx context.Context, a *app) error {
+	sig := make(chan os.Signal)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGKILL)
+	stopCh := make(chan struct{})
+
+	c, cancel := context.WithCancel(context.Background())
+
+	go func(ctx context.Context, stopCh chan struct{}) {
+		for {
+			select {
+			case <-sig:
+				fmt.Println("MAIN")
+				s := time.Since(time.Now())
+				fmt.Println(s.Seconds())
+				time.Sleep(5 * time.Second)
+				fmt.Println(s.Seconds())
+				cancel()
+
+				stopCh <- struct{}{}
+			}
+		}
+	}(c, stopCh)
+
+	if err := weaver.Run[*app](c, func(ctx context.Context, a *app) error {
 		return a.Main(ctx)
 	}); err != nil {
 		log.Fatal(err)
 	}
+
+	<-stopCh
 }
 
-//go:generate ../../cmd/weaver/weaver generate
+//go:generate ./weaver generate ./...
 
 type app struct {
 	weaver.Implements[weaver.Main]
-	reverser weaver.Ref[Reverser]
+	router weaver.Ref[routers.T]
 }
 
 func (app *app) Main(ctx context.Context) error {
-	// Get a network listener on address "localhost:12345".
-	opts := weaver.ListenerOptions{LocalAddress: "localhost:12345"}
-	lis, err := app.Listener("hello", opts)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("hello listener available on %v\n", lis)
 
-	// Serve the /hello endpoint.
-	http.Handle("/hello", weaver.InstrumentHandlerFunc("hello",
-		func(w http.ResponseWriter, r *http.Request) {
-			name := r.URL.Query().Get("name")
-			if name == "" {
-				name = "World"
-			}
-			reversed, err := app.reverser.Get().Reverse(ctx, name)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			fmt.Fprintf(w, "Hello, %s!\n", reversed)
-		}))
-	return http.Serve(lis, nil)
+	return app.router.Get().InitRoute(ctx)
+
 }
