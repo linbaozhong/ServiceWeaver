@@ -2,18 +2,17 @@ package handlers
 
 import (
 	"context"
-	"examples/hello/components"
 	"fmt"
 	"github.com/kataras/iris/v12"
+	"hello/blls/reverse"
 	"net/http"
 )
 
 type hello struct {
-	//component weaver.Instance
-	reverser components.Reverser
+	reverser reverse.T
 }
 
-func Hello(reverser components.Reverser, party iris.Party) *hello {
+func Hello(reverser reverse.T, party iris.Party) *hello {
 	obj := &hello{
 		reverser: reverser,
 	}

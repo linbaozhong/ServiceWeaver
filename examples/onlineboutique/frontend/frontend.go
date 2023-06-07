@@ -123,6 +123,7 @@ func (s *Server) Main(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	r := http.NewServeMux()
 
 	// Helper that adds a handler with HTTP metric instrumentation.

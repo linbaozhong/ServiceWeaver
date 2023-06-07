@@ -15,46 +15,20 @@ package main
 
 import (
 	"context"
-	"examples/hello/routers"
-	"fmt"
 	"github.com/ServiceWeaver/weaver"
+	"hello/routers"
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 )
 
 func main() {
-	sig := make(chan os.Signal)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGKILL)
-	stopCh := make(chan struct{})
-
-	c, cancel := context.WithCancel(context.Background())
-
-	go func(ctx context.Context, stopCh chan struct{}) {
-		for {
-			select {
-			case <-sig:
-				fmt.Println("MAIN")
-				s := time.Since(time.Now())
-				fmt.Println(s.Seconds())
-				time.Sleep(5 * time.Second)
-				fmt.Println(s.Seconds())
-				cancel()
-
-				stopCh <- struct{}{}
-			}
-		}
-	}(c, stopCh)
-
-	if err := weaver.Run[*app](c, func(ctx context.Context, a *app) error {
+	// 启动应用程序，例如 HTTP 服务等
+	e := weaver.Run[*app](context.Background(), func(ctx context.Context, a *app) error {
 		return a.Main(ctx)
-	}); err != nil {
-		log.Fatal(err)
+	})
+	if e != nil {
+		log.Fatal(e)
 	}
 
-	<-stopCh
 }
 
 //go:generate ./weaver generate ./...
@@ -65,7 +39,9 @@ type app struct {
 }
 
 func (app *app) Main(ctx context.Context) error {
-
-	return app.router.Get().InitRoute(ctx)
-
+	e := app.router.Get().InitRouter(ctx)
+	if e != nil {
+		app.Logger().Error(e.Error())
+	}
+	return e
 }
