@@ -22,44 +22,38 @@ func (r *router) InitRouter(ctx context.Context) error {
 		"X-Forwarded-For",
 	))
 
-	// 调试服务
+	// 调试服务 Prepare for commissioning services
 	app.Get("/", debug)
 	app.Head("/", debug)
-	//
 
-	//注册路由
-	handlers.Hello(r.reverser.Get(), app)
+	// 注册路由 Registered route
+	l := len(handlers.Instances)
+	for i := 0; i < l; i++ {
+		if m, ok := handlers.Instances[i].(handlers.IRegisterRouter); ok {
+			m.RegisterRouter(app, r.reverser.Get())
+		}
+	}
 
 	opts := weaver.ListenerOptions{LocalAddress: "localhost:12345"}
 	lis, e := r.Listener("hello", opts)
 	if e != nil {
+		r.Logger().Error(e.Error())
 		return e
 	}
-	////
-	//idleConnsClosed := make(chan struct{})
-	//iris.RegisterOnInterrupt(func() {
-	//	timeout := 10 * time.Second
-	//	c, cancel := context.WithTimeout(ctx, timeout)
-	//	defer cancel()
-	//	// close all hosts.
-	//	app.Shutdown(c)
-	//	close(idleConnsClosed)
-	//})
 
 	e = app.Run(iris.Listener(lis),
-		iris.WithLogLevel("debug"),
-		iris.WithoutInterruptHandler)
+		iris.WithLogLevel("debug"))
+	if e != nil {
+		r.Logger().Error(e.Error())
+	}
 
-	//<-idleConnsClosed
-	return e
+	return nil
 }
 
 func debug(c iris.Context) {
 
 	c.JSON(iris.Map{
-		"name":    "weaver services",
+		"name":    "WeaverServices(iris) Hello",
 		"version": "0.1.0",
 	})
-
-	return
 }

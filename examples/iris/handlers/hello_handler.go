@@ -12,15 +12,18 @@ type hello struct {
 	reverser reverse.T
 }
 
-func Hello(reverser reverse.T, party iris.Party) *hello {
-	obj := &hello{
-		reverser: reverser,
-	}
-	g := party.Party("/hello")
-	g.Get("/", obj.hello)
-	g.Get("/hi", obj.hi)
+func init() {
+	Instances = append(Instances, &hello{})
+}
 
-	return obj
+func (p *hello) RegisterRouter(party iris.Party, ts ...interface{}) {
+	if len(ts) == 1 {
+		p.reverser = ts[0].(reverse.T)
+	}
+
+	g := party.Party("/hello")
+	g.Get("/", p.hello)
+	g.Get("/hi", p.hi)
 }
 
 func (p *hello) hello(c iris.Context) {
@@ -48,6 +51,5 @@ func (p *hello) hi(c iris.Context) {
 		return
 	}
 
-	c.WriteString(fmt.Sprintf("HI, %s!\n", reversed))
-
+	c.WriteString(fmt.Sprintf("Hi, %s!\n", reversed))
 }

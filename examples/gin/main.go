@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC
+// Copyright 2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,29 +11,22 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package components
+package main
 
 import (
 	"context"
-
 	"github.com/ServiceWeaver/weaver"
+	"log"
 )
 
-// Reverser component.
-type Reverser interface {
-	Reverse(context.Context, string) (string, error)
-}
+//go:generate ../../cmd/weaver/weaver.exe generate ./...
 
-// Implementation of the Reverser component.
-type reverser struct {
-	weaver.Implements[Reverser]
-}
-
-func (r *reverser) Reverse(_ context.Context, s string) (string, error) {
-	runes := []rune(s)
-	n := len(runes)
-	for i := 0; i < n/2; i++ {
-		runes[i], runes[n-i-1] = runes[n-i-1], runes[i]
+func main() {
+	// 启动应用程序，例如 HTTP 服务等
+	e := weaver.Run[*Server](context.Background(), func(ctx context.Context, a *Server) error {
+		return a.Main(ctx)
+	})
+	if e != nil {
+		log.Fatal(e)
 	}
-	return string(runes), nil
 }
