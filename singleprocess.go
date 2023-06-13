@@ -154,11 +154,15 @@ func (e *singleprocessEnv) ActivateComponent(_ context.Context, component string
 	return nil
 }
 
-func (e *singleprocessEnv) GetListenerAddress(_ context.Context, listener string, opts ListenerOptions) (*protos.GetListenerAddressReply, error) {
-	return &protos.GetListenerAddressReply{Address: opts.LocalAddress}, nil
+func (e *singleprocessEnv) GetListenerAddress(_ context.Context, listener string) (*protos.GetListenerAddressReply, error) {
+	var addr string
+	if opts, ok := e.config.ListenerOptions[listener]; ok {
+		addr = opts.LocalAddress
+	}
+	return &protos.GetListenerAddressReply{Address: addr}, nil
 }
 
-func (e *singleprocessEnv) ExportListener(_ context.Context, listener, addr string, opts ListenerOptions) (*protos.ExportListenerReply, error) {
+func (e *singleprocessEnv) ExportListener(_ context.Context, listener, addr string) (*protos.ExportListenerReply, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.listeners[listener] = append(e.listeners[listener], addr)
@@ -179,6 +183,10 @@ func (e *singleprocessEnv) VerifyServerCertificate(context.Context, [][]byte, st
 
 // serveStatus runs and registers the weaver-single status server.
 func (e *singleprocessEnv) serveStatus(ctx context.Context) error {
+	// Start the signal handler before the listener
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
+
 	mux := http.NewServeMux()
 	mux.Handle("/debug/pprof/", http.DefaultServeMux)
 	status.RegisterServer(mux, e, e.SystemLogger())
@@ -219,14 +227,14 @@ func (e *singleprocessEnv) serveStatus(ctx context.Context) error {
 	}
 
 	// Unregister the deployment if this application is killed.
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-done
+		code := 0
 		if err := registry.Unregister(ctx, reg.DeploymentId); err != nil {
 			fmt.Fprintf(os.Stderr, "unregister deployment: %v\n", err)
+			code = 1
 		}
-		os.Exit(1)
+		os.Exit(code)
 	}()
 
 	return <-errs

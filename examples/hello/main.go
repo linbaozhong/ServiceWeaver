@@ -15,33 +15,43 @@ package main
 
 import (
 	"context"
-	"github.com/ServiceWeaver/weaver"
-	"hello/routers"
+	"fmt"
 	"log"
+	"net/http"
+
+	"github.com/ServiceWeaver/weaver"
 )
 
 func main() {
-	// 启动应用程序，例如 HTTP 服务等
-	e := weaver.Run[*app](context.Background(), func(ctx context.Context, a *app) error {
-		return a.Main(ctx)
-	})
-	if e != nil {
-		log.Fatal(e)
+	if err := weaver.Run(context.Background()); err != nil {
+		log.Fatal(err)
 	}
-
 }
 
-//go:generate ./weaver generate ./...
+//go:generate ../../cmd/weaver/weaver generate
 
 type app struct {
 	weaver.Implements[weaver.Main]
-	router weaver.Ref[routers.T]
+	reverser weaver.Ref[Reverser]
+	hello    weaver.Listener
 }
 
 func (app *app) Main(ctx context.Context) error {
-	e := app.router.Get().InitRouter(ctx)
-	if e != nil {
-		app.Logger().Error(e.Error())
-	}
-	return e
+	fmt.Printf("hello listener available on %v\n", app.hello)
+
+	// Serve the /hello endpoint.
+	http.Handle("/hello", weaver.InstrumentHandlerFunc("hello",
+		func(w http.ResponseWriter, r *http.Request) {
+			name := r.URL.Query().Get("name")
+			if name == "" {
+				name = "World"
+			}
+			reversed, err := app.reverser.Get().Reverse(ctx, name)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			fmt.Fprintf(w, "Hello, %s!\n", reversed)
+		}))
+	return http.Serve(app.hello, nil)
 }

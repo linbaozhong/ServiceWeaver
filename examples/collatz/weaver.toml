@@ -2,6 +2,9 @@
 binary = "./collatz"
 rollout = "5m"
 
+[listeners]
+collatz = {local_address = "localhost:9000"}
+
 [ssh]
 locations_file = "./ssh_locations.txt"
 
@@ -10,3 +13,6 @@ regions = ["us-west1"]
 public_listener = [
   {name = "collatz", hostname = "collatz.example.com"},
 ]
+
+[kube]
+public_listeners = [{name = "collatz"}]

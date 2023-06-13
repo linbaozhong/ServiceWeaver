@@ -18,7 +18,6 @@ import (
 	"context"
 	_ "embed"
 	"errors"
-	"flag"
 	"fmt"
 	"html/template"
 	"image"
@@ -35,24 +34,19 @@ import (
 	"github.com/ServiceWeaver/weaver"
 )
 
-var flagAddress = flag.String("http", ":0", "host:port to use for when running locally (picked automatically by default)")
-
 type server struct {
 	weaver.Implements[weaver.Main]
 	httpServer http.Server
 	store      weaver.Ref[SQLStore]
 	scaler     weaver.Ref[ImageScaler]
 	cache      weaver.Ref[LocalCache]
+	chat       weaver.Listener
 }
 
 func (s *server) Main(ctx context.Context) error {
 	s.httpServer.Handler = instrument(s.label, s)
-	lis, err := s.Listener("chat", weaver.ListenerOptions{LocalAddress: *flagAddress})
-	if err != nil {
-		return err
-	}
-	s.Logger().Debug("Chat service available", "address", lis)
-	return s.httpServer.Serve(lis)
+	s.Logger().Debug("Chat service available", "address", s.chat)
+	return s.httpServer.Serve(s.chat)
 }
 
 // instrument instruments the provided handler with weaver.InstrumentHandler.
@@ -254,10 +248,10 @@ func getID(str string) (int64, error) {
 func getImage(r *http.Request) ([]byte, error) {
 	img, fhdr, err := r.FormFile("image")
 	if err != nil {
-		if errors.Is(err, http.ErrMissingFile) {
+		if errors.Is(err, http.ErrMissingFile) || errors.Is(err, http.ErrNotMultipart) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("bad image form value")
+		return nil, fmt.Errorf("bad image form value %w", err)
 	}
 
 	// Validate by checking size and parsing the image.

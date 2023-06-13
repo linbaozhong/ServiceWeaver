@@ -33,7 +33,6 @@ import (
 	"github.com/ServiceWeaver/weaver/runtime/logging"
 	"github.com/ServiceWeaver/weaver/runtime/retry"
 	"github.com/ServiceWeaver/weaver/runtime/tool"
-	"github.com/ServiceWeaver/weaver/runtime/version"
 	"github.com/google/uuid"
 )
 
@@ -87,17 +86,6 @@ func deploy(ctx context.Context, args []string) error {
 	if err := runtime.ParseConfigSection(configKey, shortConfigKey, appConfig.Sections, &multiConfig); err != nil {
 		return fmt.Errorf("parse multi config: %w", err)
 	}
-	major, minor, patch, err := version.ReadVersion(appConfig.Binary)
-	if err != nil {
-		return fmt.Errorf("read binary version: %w", err)
-	}
-	if major != version.Major || minor != version.Minor || patch != version.Patch {
-		return fmt.Errorf(
-			"version mismatch: deployer version %d.%d.%d is incompatible with app version %d.%d.%d",
-			version.Major, version.Minor, version.Patch,
-			major, minor, patch,
-		)
-	}
 
 	// Create the deployer.
 	deploymentId := uuid.New().String()
@@ -105,6 +93,10 @@ func deploy(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("create deployer: %w", err)
 	}
+
+	// Start signal handler before listener
+	userDone := make(chan os.Signal, 1)
+	signal.Notify(userDone, syscall.SIGINT, syscall.SIGTERM)
 
 	// Run a status server.
 	lis, err := net.Listen("tcp", "localhost:0")
@@ -149,25 +141,26 @@ func deploy(ctx context.Context, args []string) error {
 		return fmt.Errorf("register deployment: %w", err)
 	}
 
-	userDone := make(chan os.Signal, 1)
 	deployerDone := make(chan error, 1)
 	go func() {
 		err := d.wait()
 		deployerDone <- err
 	}()
-	signal.Notify(userDone, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
+		var code = 1
 		// Wait for the user to kill the app or the app to return an error.
 		select {
-		case <-userDone:
+		case sig := <-userDone:
 			fmt.Fprintf(os.Stderr, "Application %s terminated by the user\n", appConfig.Name)
+			code = 128 + int(sig.(syscall.Signal))
 		case err := <-deployerDone:
 			fmt.Fprintf(os.Stderr, "Application %s error: %v\n", appConfig.Name, err)
 		}
 		if err := registry.Unregister(ctx, deploymentId); err != nil {
 			fmt.Fprintf(os.Stderr, "unregister deployment: %v\n", err)
+			code = 1
 		}
-		os.Exit(1)
+		os.Exit(code)
 	}()
 
 	// Follow the logs.

@@ -21,11 +21,13 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ServiceWeaver/weaver"
 	"github.com/ServiceWeaver/weaver/internal/private"
+	"github.com/ServiceWeaver/weaver/internal/reflection"
 	"github.com/ServiceWeaver/weaver/runtime/logging"
 )
 
@@ -82,10 +84,49 @@ type FakeComponent struct {
 // The result is typically placed in Runner.Fakes.
 // REQUIRES: impl must implement T.
 func Fake[T any](impl any) FakeComponent {
+	t := reflection.Type[T]()
 	if _, ok := impl.(T); !ok {
-		panic(fmt.Sprintf("%T does not implement %v", impl, reflect.TypeOf((*T)(nil)).Elem()))
+		panic(fmt.Sprintf("%T does not implement %v", impl, t))
 	}
-	return FakeComponent{intf: reflect.TypeOf((*T)(nil)).Elem(), impl: impl}
+	return FakeComponent{intf: t, impl: impl}
+}
+
+// private.App object per live test or benchmark.
+var (
+	appMu sync.Mutex
+	apps  map[testing.TB]private.App
+)
+
+func registerApp(t testing.TB, app private.App) {
+	appMu.Lock()
+	defer appMu.Unlock()
+	if apps == nil {
+		apps = map[testing.TB]private.App{}
+	}
+	apps[t] = app
+}
+
+func unregisterApp(t testing.TB, app private.App) {
+	appMu.Lock()
+	defer appMu.Unlock()
+	delete(apps, t)
+}
+
+func getApp(t testing.TB) private.App {
+	appMu.Lock()
+	defer appMu.Unlock()
+	return apps[t]
+}
+
+// ListenerAddress returns the address (of the form host:port) for the
+// listener with the specified name. This call will block waiting for
+// the listener to be initialized if necessary.
+func ListenerAddress(t testing.TB, name string) (string, error) {
+	app := getApp(t)
+	if app == nil {
+		return "", fmt.Errorf("Service Weaver application is not running")
+	}
+	return app.ListenerAddress(name)
 }
 
 //go:generate ../cmd/weaver/weaver generate
@@ -240,6 +281,8 @@ func runWeaver(ctx context.Context, t testing.TB, runner Runner, body func(conte
 	if err != nil {
 		return err
 	}
+	registerApp(t, app)
+	t.Cleanup(func() { unregisterApp(t, app) })
 
 	// Run wait() in a go routine.
 	sub, cancel := context.WithCancel(ctx)
@@ -259,7 +302,7 @@ func runWeaver(ctx context.Context, t testing.TB, runner Runner, body func(conte
 		if err != nil && !errors.Is(err, context.Canceled) {
 			t.Fatalf("weaver.Main.Main failure: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(time.Millisecond * 100):
 		t.Log("weaver.Main.Main not exiting after cancellation")
 	}
 	return nil

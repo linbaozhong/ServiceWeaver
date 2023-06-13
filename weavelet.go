@@ -24,12 +24,14 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ServiceWeaver/weaver/internal/config"
 	"github.com/ServiceWeaver/weaver/internal/envelope/conn"
 	"github.com/ServiceWeaver/weaver/internal/net/call"
 	"github.com/ServiceWeaver/weaver/internal/private"
+	"github.com/ServiceWeaver/weaver/internal/reflection"
 	"github.com/ServiceWeaver/weaver/internal/traceio"
 	"github.com/ServiceWeaver/weaver/runtime"
 	"github.com/ServiceWeaver/weaver/runtime/codegen"
@@ -63,6 +65,14 @@ type weavelet struct {
 
 	componentsByName map[string]*component       // component name -> component
 	componentsByType map[reflect.Type]*component // component type -> component
+
+	listenersMu sync.Mutex
+	listeners   map[string]*listenerState
+}
+
+type listenerState struct {
+	addr        string
+	initialized chan struct{} // Closed when addr has been filled
 }
 
 type transport struct {
@@ -228,18 +238,32 @@ func (w *weavelet) start() error {
 	}
 
 	w.logRolodexCard()
+
+	// Make sure Main is initialized if local.
+	if _, err := w.getMainIfLocal(); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (w *weavelet) Wait(ctx context.Context) error {
+// getMainIfLocal returns the weaver.Main implementation if hosted in
+// this weavelet, or nil if weaver.Main is remote.
+func (w *weavelet) getMainIfLocal() (*componentImpl, error) {
 	// Note that a weavertest may have RunMain set to true, but no main
 	// component registered.
-	if m, ok := w.componentsByType[reflect.TypeOf((*Main)(nil)).Elem()]; ok && w.info.RunMain {
-		// This process is hosting weaver.Main, so call its Main() method.
-		impl, err := w.getImpl(ctx, m)
-		if err != nil {
-			return err
-		}
+	if m, ok := w.componentsByType[reflection.Type[Main]()]; ok && w.info.RunMain {
+		return w.getImpl(w.ctx, m)
+	}
+	return nil, nil
+}
+
+func (w *weavelet) Wait(ctx context.Context) error {
+	// Call weaver.Main.Main if weaver.Main is hosted locally.
+	impl, err := w.getMainIfLocal()
+	if err != nil {
+		return nil
+	}
+	if impl != nil {
 		return impl.impl.(Main).Main(ctx)
 	}
 
@@ -336,22 +360,23 @@ func (w *weavelet) getInstance(ctx context.Context, c *component, requester stri
 	return c.info.ClientStubFn(stub, requester), nil, nil
 }
 
-// getListener returns a network listener with the given name.
-func (w *weavelet) getListener(name string, opts ListenerOptions) (*Listener, error) {
+// getListener returns a network listener with the given name, along with its
+// proxy address.
+func (w *weavelet) getListener(name string) (net.Listener, string, error) {
 	if name == "" {
-		return nil, fmt.Errorf("getListener(%q): empty listener name", name)
+		return nil, "", fmt.Errorf("getListener(%q): empty listener name", name)
 	}
 
 	// Get the address to listen on.
-	addr, err := w.env.GetListenerAddress(w.ctx, name, opts)
+	addr, err := w.env.GetListenerAddress(w.ctx, name)
 	if err != nil {
-		return nil, fmt.Errorf("getListener(%q): %w", name, err)
+		return nil, "", fmt.Errorf("getListener(%q): %w", name, err)
 	}
 
 	// Listen on the address.
 	l, err := net.Listen("tcp", addr.Address)
 	if err != nil {
-		return nil, fmt.Errorf("getListener(%q): %w", name, err)
+		return nil, "", fmt.Errorf("getListener(%q): %w", name, err)
 	}
 
 	// Export the listener.
@@ -359,15 +384,22 @@ func (w *weavelet) getListener(name string, opts ListenerOptions) (*Listener, er
 	var reply *protos.ExportListenerReply
 	if err := w.repeatedly(errMsg, func() error {
 		var err error
-		reply, err = w.env.ExportListener(w.ctx, name, l.Addr().String(), opts)
+		reply, err = w.env.ExportListener(w.ctx, name, l.Addr().String())
 		return err
 	}); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if reply.Error != "" {
-		return nil, fmt.Errorf("getListener(%q): %s", name, reply.Error)
+		return nil, "", fmt.Errorf("getListener(%q): %s", name, reply.Error)
 	}
-	return &Listener{Listener: l, proxyAddr: reply.ProxyAddress}, nil
+
+	w.listenersMu.Lock()
+	defer w.listenersMu.Unlock()
+	ls := w.getListenerState(name)
+	ls.addr = l.Addr().String()
+	close(ls.initialized) // Mark as initialized
+
+	return l, reply.ProxyAddress, nil
 }
 
 // addHandlers registers a component's methods as handlers in the given map.
@@ -393,6 +425,29 @@ func (w *weavelet) addHandlers(handlers *call.HandlerMap, c *component) {
 		}
 		handlers.Set(c.info.Name, mname, handler)
 	}
+}
+
+func (w *weavelet) ListenerAddress(name string) (string, error) {
+	w.listenersMu.Lock()
+	ls := w.getListenerState(name)
+	w.listenersMu.Unlock()
+
+	<-ls.initialized // Wait until initialized
+	return ls.addr, nil
+}
+
+// REQUIRES: w.listenersMu is held
+func (w *weavelet) getListenerState(name string) *listenerState {
+	l := w.listeners[name]
+	if l != nil {
+		return l
+	}
+	l = &listenerState{initialized: make(chan struct{})}
+	if w.listeners == nil {
+		w.listeners = map[string]*listenerState{}
+	}
+	w.listeners[name] = l
+	return l
 }
 
 // GetLoad implements the WeaveletHandler interface.
@@ -588,6 +643,12 @@ func (w *weavelet) createComponent(ctx context.Context, c *component) error {
 		r, _, err := w.getInstance(ctx, sub, c.info.Name)
 		return r, err
 	})
+	if err != nil {
+		return err
+	}
+
+	// Fill listener fields.
+	err = fillListeners(obj, w.getListener)
 	if err != nil {
 		return err
 	}
