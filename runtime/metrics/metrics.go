@@ -17,17 +17,16 @@ package metrics
 
 import (
 	"encoding/binary"
-	"expvar"
 	"fmt"
 	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
 
+	"github.com/ServiceWeaver/weaver/runtime/protos"
 	"github.com/google/uuid"
 	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
-	"github.com/ServiceWeaver/weaver/runtime/protos"
 )
 
 var (
@@ -69,10 +68,13 @@ type Metric struct {
 	id     uint64            // globally unique metric id
 	labels map[string]string // materialized labels from calling labelsThunk
 
-	version atomic.Uint64   // incremented on every update, for change detection
-	value   expvar.Float    // value for Counter and Gauge, sum for Histogram
-	bounds  []float64       // histogram bounds
-	counts  []atomic.Uint64 // histogram counts
+	fvalue atomicFloat64 // value for Counter and Gauge, sum for Histogram
+	ivalue atomic.Uint64 // integer increments for Counter (separated for speed)
+
+	// For histograms only:
+	putCount atomic.Uint64   // incremented on every Put, for change detection
+	bounds   []float64       // histogram bounds
+	counts   []atomic.Uint64 // histogram counts
 }
 
 // A MetricSnapshot is a snapshot of a metric.
@@ -185,37 +187,51 @@ func (m *Metric) Name() string {
 	return m.name
 }
 
+// Inc adds one to the metric value.
+func (m *Metric) Inc() {
+	m.ivalue.Add(1)
+}
+
 // Add adds the provided delta to the metric's value.
 func (m *Metric) Add(delta float64) {
-	m.value.Add(delta)
-	m.version.Add(1)
+	m.fvalue.add(delta)
 }
 
 // Sub subtracts the provided delta from the metric's value.
 func (m *Metric) Sub(delta float64) {
-	m.value.Add(-delta)
-	m.version.Add(1)
+	m.fvalue.add(-delta)
 }
 
 // Set sets the metric's value.
 func (m *Metric) Set(val float64) {
-	m.value.Set(val)
-	m.version.Add(1)
+	m.fvalue.set(val)
 }
 
 // Put adds the provided value to the metric's histogram.
 func (m *Metric) Put(val float64) {
-	idx := sort.SearchFloat64s(m.bounds, val)
-	if idx < len(m.bounds) && val == m.bounds[idx] {
-		idx++
+	var idx int
+	if len(m.bounds) == 0 || val < m.bounds[0] {
+		// Skip binary search for values that fall in the first bucket
+		// (often true for short latency operations).
+	} else {
+		idx = sort.SearchFloat64s(m.bounds, val)
+		if idx < len(m.bounds) && val == m.bounds[idx] {
+			idx++
+		}
 	}
 	m.counts[idx].Add(1)
-	m.value.Add(val)
-	m.version.Add(1)
+
+	// Microsecond latencies are often zero for very fast functions.
+	if val != 0 {
+		m.fvalue.add(val)
+	}
+	m.putCount.Add(1)
 }
 
-// Init initializes the id and labels of a metric.
-func (m *Metric) Init() {
+// initIdAndLabels initializes the id and labels of a metric.
+// We delay this initialization until the first time we export a
+// metric to avoid slowing down a Get() call.
+func (m *Metric) initIdAndLabels() {
 	m.once.Do(func() {
 		if labels := m.labelsThunk(); len(labels) > 0 {
 			m.labels = labels
@@ -225,9 +241,9 @@ func (m *Metric) Init() {
 	})
 }
 
-// Version returns the metric's version.
-func (m *Metric) Version() uint64 {
-	return m.version.Load()
+// get returns the current value (sum of all added values for histograms).
+func (m *Metric) get() float64 {
+	return m.fvalue.get() + float64(m.ivalue.Load())
 }
 
 // Snapshot returns a snapshot of the metric. You must call Init at least once
@@ -246,7 +262,7 @@ func (m *Metric) Snapshot() *MetricSnapshot {
 		Type:   m.typ,
 		Help:   m.help,
 		Labels: maps.Clone(m.labels),
-		Value:  m.value.Value(),
+		Value:  m.get(),
 		Bounds: slices.Clone(m.bounds),
 		Counts: counts,
 	}
@@ -276,7 +292,7 @@ func (m *Metric) MetricValue() *protos.MetricValue {
 	}
 	return &protos.MetricValue{
 		Id:     m.id,
-		Value:  m.value.Value(),
+		Value:  m.get(),
 		Counts: counts,
 	}
 }
@@ -358,7 +374,7 @@ func Snapshot() []*MetricSnapshot {
 	defer metricsMu.RUnlock()
 	snapshots := make([]*MetricSnapshot, 0, len(metrics))
 	for _, metric := range metrics {
-		metric.Init()
+		metric.initIdAndLabels()
 		snapshots = append(snapshots, metric.Snapshot())
 	}
 	return snapshots

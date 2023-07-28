@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package bin_test
+package bin
 
 import (
 	"fmt"
@@ -21,18 +21,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ServiceWeaver/weaver/runtime/bin"
 	"github.com/ServiceWeaver/weaver/runtime/codegen"
+	"github.com/ServiceWeaver/weaver/runtime/version"
 	"github.com/google/go-cmp/cmp"
 )
 
 func TestReadComponentGraph(t *testing.T) {
-	type testCase struct {
-		os   string
-		arch string
-	}
-
-	for _, test := range []testCase{
+	for _, test := range []struct{ os, arch string }{
 		{"linux", "amd64"},
 		{"windows", "amd64"},
 		{"darwin", "arm64"},
@@ -43,13 +38,12 @@ func TestReadComponentGraph(t *testing.T) {
 			binary := filepath.Join(d, "bin")
 			cmd := exec.Command("go", "build", "-o", binary, "./testprogram")
 			cmd.Env = append(os.Environ(), "GOOS="+test.os, "GOARCH="+test.arch)
-			err := cmd.Run()
-			if err != nil {
+			if err := cmd.Run(); err != nil {
 				t.Fatal(err)
 			}
 
 			// Read edges.
-			edges, err := bin.ReadComponentGraph(binary)
+			edges, err := ReadComponentGraph(binary)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -87,12 +81,7 @@ func TestReadComponentGraph(t *testing.T) {
 }
 
 func TestReadListeners(t *testing.T) {
-	type testCase struct {
-		os   string
-		arch string
-	}
-
-	for _, test := range []testCase{
+	for _, test := range []struct{ os, arch string }{
 		{"linux", "amd64"},
 		{"windows", "amd64"},
 		{"darwin", "arm64"},
@@ -109,7 +98,7 @@ func TestReadListeners(t *testing.T) {
 			}
 
 			// Read listeners.
-			actual, err := bin.ReadListeners(binary)
+			actual, err := ReadListeners(binary)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -120,13 +109,74 @@ func TestReadListeners(t *testing.T) {
 			}
 			main := "github.com/ServiceWeaver/weaver/Main"
 			want := []codegen.ComponentListeners{
-				{Component: main, Listeners: []string{"applis"}},
-				{Component: pkg("A"), Listeners: []string{"alis1", "alis2"}},
-				{Component: pkg("B"), Listeners: []string{"listener"}},
-				{Component: pkg("C"), Listeners: []string{"clis"}},
+				{Component: main, Listeners: []string{"appLis"}},
+				{Component: pkg("A"), Listeners: []string{"aLis1", "aLis2", "aLis3"}},
+				{Component: pkg("B"), Listeners: []string{"Listener"}},
+				{Component: pkg("C"), Listeners: []string{"cLis"}},
 			}
 			if diff := cmp.Diff(want, actual); diff != "" {
 				t.Fatalf("unexpected listeners (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestExtractVersion(t *testing.T) {
+	for _, want := range []Versions{
+		{
+			ModuleVersion:   version.SemVer{Major: 1, Minor: 2, Patch: 3},
+			DeployerVersion: version.SemVer{Major: 4, Minor: 5, Patch: 6},
+		},
+		{
+			ModuleVersion:   version.SemVer{Major: 100, Minor: 100, Patch: 234},
+			DeployerVersion: version.SemVer{Major: 0, Minor: 567, Patch: 8910},
+		},
+	} {
+		name := fmt.Sprintf("%s-%s", want.ModuleVersion, want.DeployerVersion)
+		t.Run(name, func(t *testing.T) {
+			// Embed the version string inside a big array of bytes.
+			var bytes [10000]byte
+			embedded := fmt.Sprintf("⟦wEaVeRvErSiOn:module=%s;deployer=%s⟧", want.ModuleVersion, want.DeployerVersion)
+			copy(bytes[1234:], []byte(embedded))
+
+			// Extract the version string.
+			got, err := extractVersions(bytes[:])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatalf("bad deployer API version: got %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+func TestReadVersion(t *testing.T) {
+	for _, test := range []struct{ os, arch string }{
+		{"linux", "amd64"},
+		{"windows", "amd64"},
+		{"darwin", "arm64"},
+	} {
+		t.Run(fmt.Sprintf("%s/%s", test.os, test.arch), func(t *testing.T) {
+			// Build the binary for os/arch.
+			d := t.TempDir()
+			binary := filepath.Join(d, "bin")
+			cmd := exec.Command("go", "build", "-o", binary, "./testprogram")
+			cmd.Env = append(os.Environ(), "GOOS="+test.os, "GOARCH="+test.arch)
+			if err := cmd.Run(); err != nil {
+				t.Fatal(err)
+			}
+
+			// Read version.
+			got, err := ReadVersions(binary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.ModuleVersion != version.ModuleVersion {
+				t.Fatalf("bad module version: got %s, want %s", got.ModuleVersion, version.ModuleVersion)
+			}
+			if got.DeployerVersion != version.DeployerVersion {
+				t.Fatalf("bad deployer version: got %s, want %s", got.DeployerVersion, version.DeployerVersion)
 			}
 		})
 	}

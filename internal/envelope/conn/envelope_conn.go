@@ -21,11 +21,9 @@ import (
 	"sync"
 
 	"github.com/ServiceWeaver/weaver/internal/queue"
-	"github.com/ServiceWeaver/weaver/internal/traceio"
 	"github.com/ServiceWeaver/weaver/runtime/metrics"
 	"github.com/ServiceWeaver/weaver/runtime/protos"
 	"github.com/ServiceWeaver/weaver/runtime/version"
-	"go.opentelemetry.io/otel/sdk/trace"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -38,7 +36,7 @@ type EnvelopeHandler interface {
 	VerifyClientCertificate(context.Context, *protos.VerifyClientCertificateRequest) (*protos.VerifyClientCertificateReply, error)
 	VerifyServerCertificate(context.Context, *protos.VerifyServerCertificateRequest) (*protos.VerifyServerCertificateReply, error)
 	HandleLogEntry(context.Context, *protos.LogEntry) error
-	HandleTraceSpans(context.Context, []trace.ReadOnlySpan) error
+	HandleTraceSpans(context.Context, *protos.TraceSpans) error
 }
 
 // EnvelopeConn is the envelope side of the connection between a weavelet and
@@ -245,11 +243,7 @@ func (e *EnvelopeConn) handleMessage(msg *protos.WeaveletMsg, h EnvelopeHandler)
 	case msg.LogEntry != nil:
 		return h.HandleLogEntry(e.ctx, msg.LogEntry)
 	case msg.TraceSpans != nil:
-		traces := make([]trace.ReadOnlySpan, len(msg.TraceSpans.Span))
-		for i, span := range msg.TraceSpans.Span {
-			traces[i] = &traceio.ReadSpan{Span: span}
-		}
-		return h.HandleTraceSpans(e.ctx, traces)
+		return h.HandleTraceSpans(e.ctx, msg.TraceSpans)
 	default:
 		err := fmt.Errorf("envelope_conn: unexpected message %+v", msg)
 		e.conn.cleanup(err)
@@ -381,18 +375,13 @@ func verifyWeaveletInfo(wlet *protos.WeaveletInfo) error {
 // checkVersion checks that the deployer API version the deployer was built
 // with is compatible with the deployer API version the app was built with,
 // erroring out if they are not compatible.
-func checkVersion(appVersion *protos.SemVer) error {
-	if appVersion == nil {
+func checkVersion(v *protos.SemVer) error {
+	if v == nil {
 		return fmt.Errorf("version mismatch: nil app version")
 	}
-	if appVersion.Major != version.Major ||
-		appVersion.Minor != version.Minor ||
-		appVersion.Patch != version.Patch {
-		return fmt.Errorf(
-			"version mismatch: deployer version %d.%d.%d is incompatible with app version %d.%d.%d.",
-			version.Major, version.Minor, version.Patch,
-			appVersion.Major, appVersion.Minor, appVersion.Patch,
-		)
+	got := version.SemVer{Major: int(v.Major), Minor: int(v.Minor), Patch: int(v.Patch)}
+	if got != version.DeployerVersion {
+		return fmt.Errorf("version mismatch: deployer's deployer API version %s is incompatible with app' deployer API version %s.", version.DeployerVersion, got)
 	}
 	return nil
 }

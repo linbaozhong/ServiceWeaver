@@ -24,22 +24,21 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/ServiceWeaver/weaver/internal/status"
+	"github.com/ServiceWeaver/weaver/internal/tool/config"
 	"github.com/ServiceWeaver/weaver/runtime"
+	"github.com/ServiceWeaver/weaver/runtime/bin"
 	"github.com/ServiceWeaver/weaver/runtime/codegen"
 	"github.com/ServiceWeaver/weaver/runtime/colors"
 	"github.com/ServiceWeaver/weaver/runtime/logging"
 	"github.com/ServiceWeaver/weaver/runtime/retry"
 	"github.com/ServiceWeaver/weaver/runtime/tool"
+	"github.com/ServiceWeaver/weaver/runtime/version"
 	"github.com/google/uuid"
 )
-
-// config contains the options in the [multi] section of a weaver config file.
-type config struct {
-	MTLS bool `toml:"mtls"` // enable mTLS?
-}
 
 const (
 	configKey      = "github.com/ServiceWeaver/weaver/multi"
@@ -71,25 +70,57 @@ func deploy(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("load config file %q: %w\n", configFile, err)
 	}
+
+	// Parse and sanity-check the application section of the config.
 	appConfig, err := runtime.ParseConfig(configFile, string(bytes), codegen.ComponentConfigValidator)
 	if err != nil {
 		return fmt.Errorf("load config file %q: %w\n", configFile, err)
 	}
-
-	// Sanity check the config.
 	if _, err := os.Stat(appConfig.Binary); errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("binary %q doesn't exist", appConfig.Binary)
 	}
 
 	// Parse the multi section of the config.
-	multiConfig := config{}
-	if err := runtime.ParseConfigSection(configKey, shortConfigKey, appConfig.Sections, &multiConfig); err != nil {
-		return fmt.Errorf("parse multi config: %w", err)
+	multiConfig, err := config.GetDeployerConfig[MultiConfig, MultiConfig_ListenerOptions](configKey, shortConfigKey, appConfig)
+	if err != nil {
+		return err
+	}
+	multiConfig.App = appConfig
+
+	// Check version compatibility.
+	versions, err := bin.ReadVersions(appConfig.Binary)
+	if err != nil {
+		return fmt.Errorf("read versions: %w", err)
+	}
+	if versions.DeployerVersion != version.DeployerVersion {
+		// Try to relativize the binary, defaulting to the absolute path if
+		// there are any errors..
+		binary := appConfig.Binary
+		if cwd, err := os.Getwd(); err == nil {
+			if rel, err := filepath.Rel(cwd, appConfig.Binary); err == nil {
+				binary = rel
+			}
+		}
+		return fmt.Errorf(`
+ERROR: The binary you're trying to deploy (%q) was built with
+github.com/ServiceWeaver/weaver module version %s. However, the 'weaver
+multi' binary you're using was built with weaver module version %s.
+These versions are incompatible.
+
+We recommend updating both the weaver module your application is built with and
+updating the 'weaver multi' command by running the following.
+
+    go get github.com/ServiceWeaver/weaver@latest
+    go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
+
+Then, re-build your code and re-run 'weaver multi deploy'. If the problem
+persists, please file an issue at https://github.com/ServiceWeaver/weaver/issues.`,
+			binary, versions.ModuleVersion, version.ModuleVersion)
 	}
 
 	// Create the deployer.
 	deploymentId := uuid.New().String()
-	d, err := newDeployer(ctx, deploymentId, appConfig, &multiConfig)
+	d, err := newDeployer(ctx, deploymentId, multiConfig)
 	if err != nil {
 		return fmt.Errorf("create deployer: %w", err)
 	}

@@ -17,7 +17,6 @@ package codegen
 import (
 	"encoding"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 
@@ -250,23 +249,89 @@ func (e *Encoder) Len(l int) {
 	e.Int32(int32(l))
 }
 
-// Error encodes an arg of type error. We save enough type information
-// to allow errors.Unwrap() and errors.Is() to work correctly.
-func (e *Encoder) Error(err error) {
-	// Get the stack of wrapped errors.
-	stack := make([]error, 0, 4)
-	for err != nil {
-		stack = append(stack, err)
-		err = errors.Unwrap(err)
-	}
+// Error encoding
+//
+// An error can be composed of a tree of errors (see the errors package)
+// We encode such a tree in a linear list of errors visited in depth-first
+// order.
+//
+// The encoding is a list of encoded errors terminated by a <endOfErrors>.  An
+// encoded error is one of:
+//
+// <serializedErrorVal,typKey,serial> for registered serializable error types.
+//
+// <serializedErrorPtr,typeKey,serial> where a pointer to an error has been
+// registered as serializable.
+//
+// <emulatedError,message,fmtError> for unregistered error types.
+const (
+	endOfErrors        uint8 = 0
+	serializedErrorVal uint8 = 1
+	serializedErrorPtr uint8 = 2
+	emulatedError      uint8 = 3
+)
 
-	e.Int(len(stack))
-	for _, err := range stack {
+// Error encodes an arg of type error. We save enough type information
+// to allow errors.Unwrap(), errors.Is(), and errors.As() to work correctly.
+func (e *Encoder) Error(err error) {
+	// Convert the tree of wrapped errors into a single list.
+	// We do not use errors.Unwrap() since it does not visit the
+	// children found by "Unwrap()[]error".
+	//
+	// The encoding is a list of encoded errors terminated by a <0>.
+	// An encoded error is either <1,typKey,serialization> for
+	// registered custom error types, or <2,message,fmtError> for
+	// unregistered error types.
+	seen := map[error]struct{}{}
+	var dfs func(error)
+	dfs = func(err error) {
+		if err == nil {
+			return
+		}
+
+		// Avoid cycles and potential exponential expansion of diamond patterns.
+		if _, ok := seen[err]; ok {
+			return
+		}
+		seen[err] = struct{}{}
+
+		// If err can be marshaled, do that and skip extracting its children
+		// since serialized form should contain all of them.
+		if am, ok := err.(AutoMarshal); ok {
+			e.Uint8(serializedErrorVal)
+			e.Interface(am)
+			return
+		}
+
+		// See if pointer to err implements AutoMarshal. This allows
+		// the Error() method to have a value receiver.
+		if am, ok := pointerTo(err).(AutoMarshal); ok {
+			e.Uint8(serializedErrorPtr)
+			e.Interface(am)
+			return
+		}
+
+		// Send the error message and the representation of err so we
+		// can do plain comparisons at the other end.
+		e.Uint8(emulatedError)
 		e.String(err.Error())
 		e.String(fmtError(err))
 
-		// TODO(sanjay): If a wrapped errors can be serialized using Gob, consider
-		// saving that serialization. This may allow us to implement the As() method
-		// that reconstructs an error value with the original type at the receiver.
+		switch u := err.(type) {
+		case interface{ Unwrap() error }:
+			dfs(u.Unwrap())
+		case interface{ Unwrap() []error }:
+			for _, child := range u.Unwrap() {
+				dfs(child)
+			}
+		}
 	}
+	dfs(err)
+	e.Uint8(endOfErrors)
+}
+
+// Interface encodes value prefixed with its concrete type.
+func (e *Encoder) Interface(value AutoMarshal) {
+	e.String(typeKey(value))
+	value.WeaverMarshal(e)
 }

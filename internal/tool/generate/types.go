@@ -583,6 +583,30 @@ func isInvalid(t types.Type) bool {
 	return t.String() == "invalid type"
 }
 
+// implementsError returns whether the provided type is a concrete type that
+// implements error.
+func (tset *typeSet) implementsError(t types.Type) bool {
+	if _, ok := t.Underlying().(*types.Interface); ok {
+		return false
+	}
+	obj, _, _ := types.LookupFieldOrMethod(t, true, tset.pkg.Types, "Error")
+	method, ok := obj.(*types.Func)
+	if !ok {
+		return false
+	}
+	sig, ok := method.Type().(*types.Signature)
+	if !ok {
+		return false
+	}
+	if args := sig.Params(); args.Len() != 0 {
+		return false
+	}
+	if results := sig.Results(); results.Len() != 1 || !isString(results.At(0).Type()) {
+		return false
+	}
+	return true
+}
+
 // isProto returns whether the provided type is a concrete type that implements
 // the proto.Message interface.
 func (tset *typeSet) isProto(t types.Type) bool {
@@ -865,6 +889,11 @@ func isWeaverAutoMarshal(t types.Type) bool {
 	return isWeaverType(t, "AutoMarshal", 0)
 }
 
+func isString(t types.Type) bool {
+	b, ok := t.(*types.Basic)
+	return ok && b.Kind() == types.String
+}
+
 func isContext(t types.Type) bool {
 	n, ok := t.(*types.Named)
 	if !ok {
@@ -899,8 +928,10 @@ func isPrimitiveRouter(t types.Type) bool {
 }
 
 // isValidRouterType returns whether the provided type is a valid router type.
-// A router can be an integer (signed or unsigned), a float, or a string. Or,
-// it can be a struct where every field is an integer, float, or string.
+// A router type can be one of the following: an integer (signed or unsigned),
+// a float, or a string. Alternatively, it can be a struct that may optioanly
+// embed the weaver.AutoMarshal struct and rest of the fields must be either
+// integers, floats, or strings.
 func isValidRouterType(t types.Type) bool {
 	t = t.Underlying()
 	if isPrimitiveRouter(t) {
@@ -911,7 +942,8 @@ func isValidRouterType(t types.Type) bool {
 		return false
 	}
 	for i := 0; i < s.NumFields(); i++ {
-		if !isPrimitiveRouter(s.Field(i).Type()) {
+		ft := s.Field(i).Type()
+		if !isPrimitiveRouter(ft) && !isWeaverAutoMarshal(ft) {
 			return false
 		}
 	}

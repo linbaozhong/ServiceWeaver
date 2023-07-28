@@ -33,7 +33,6 @@ import (
 	"github.com/ServiceWeaver/weaver/examples/onlineboutique/productcatalogservice"
 	"github.com/ServiceWeaver/weaver/examples/onlineboutique/recommendationservice"
 	"github.com/ServiceWeaver/weaver/examples/onlineboutique/shippingservice"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const (
@@ -88,7 +87,7 @@ type Server struct {
 	boutique weaver.Listener
 }
 
-func (s *Server) Main(ctx context.Context) error {
+func Serve(ctx context.Context, s *Server) error {
 	// Find out where we're running.
 	// Set ENV_PLATFORM (default to local if not set; use env var if set;
 	// otherwise detect GCP, which overrides env).
@@ -156,9 +155,8 @@ func (s *Server) Main(ctx context.Context) error {
 	var handler http.Handler = r
 	// TODO(spetrovic): Use the Service Weaver per-component config to provisionaly
 	// add these stats.
-	handler = ensureSessionID(handler)             // add session ID
-	handler = newLogHandler(s, handler)            // add logging
-	handler = otelhttp.NewHandler(handler, "http") // add tracing
+	handler = ensureSessionID(handler)           // add session ID
+	handler = newLogHandler(s.Logger(), handler) // add logging
 	s.handler = handler
 
 	s.Logger().Debug("Frontend available", "addr", s.boutique)

@@ -14,33 +14,43 @@
 
 package codegen
 
-import "github.com/ServiceWeaver/weaver/metrics"
+import (
+	"time"
+
+	"github.com/ServiceWeaver/weaver/metrics"
+)
+
+// Names of automatically populated metrics.
+const (
+	MethodCountsName       = "serviceweaver_method_count"
+	MethodErrorsName       = "serviceweaver_method_error_count"
+	MethodLatenciesName    = "serviceweaver_method_latency_micros"
+	MethodBytesRequestName = "serviceweaver_method_bytes_request"
+	MethodBytesReplyName   = "serviceweaver_method_bytes_reply"
+)
 
 var (
 	// The following metrics are automatically populated for the user.
-	//
-	// TODO(mwhittaker): Allow the user to disable these metrics.
-	// It adds ~169ns of latency per method call.
-	MethodCounts = metrics.NewCounterMap[MethodLabels](
-		"serviceweaver_remote_method_count",
+	methodCounts = metrics.NewCounterMap[MethodLabels](
+		MethodCountsName,
 		"Count of Service Weaver component method invocations",
 	)
-	MethodErrors = metrics.NewCounterMap[MethodLabels](
-		"serviceweaver_remote_method_error_count",
+	methodErrors = metrics.NewCounterMap[MethodLabels](
+		MethodErrorsName,
 		"Count of Service Weaver component method invocations that result in an error",
 	)
-	MethodLatencies = metrics.NewHistogramMap[MethodLabels](
-		"serviceweaver_remote_method_latency_micros",
+	methodLatencies = metrics.NewHistogramMap[MethodLabels](
+		MethodLatenciesName,
 		"Duration, in microseconds, of Service Weaver component method execution",
 		metrics.NonNegativeBuckets,
 	)
-	MethodBytesRequest = metrics.NewHistogramMap[MethodLabels](
-		"serviceweaver_remote_method_bytes_request",
+	methodBytesRequest = metrics.NewHistogramMap[MethodLabels](
+		MethodBytesRequestName,
 		"Number of bytes in Service Weaver component method requests",
 		metrics.NonNegativeBuckets,
 	)
-	MethodBytesReply = metrics.NewHistogramMap[MethodLabels](
-		"serviceweaver_remote_method_bytes_reply",
+	methodBytesReply = metrics.NewHistogramMap[MethodLabels](
+		MethodBytesReplyName,
 		"Number of bytes in Service Weaver component method replies",
 		metrics.NonNegativeBuckets,
 	)
@@ -50,24 +60,52 @@ type MethodLabels struct {
 	Caller    string // full calling component name
 	Component string // full callee component name
 	Method    string // callee component method's name
+	Remote    bool   // Is this a remote call?
 }
 
 // MethodMetrics contains metrics for a single Service Weaver component method.
 type MethodMetrics struct {
-	Count        *metrics.Counter   // See MethodCounts.
-	ErrorCount   *metrics.Counter   // See MethodErrors.
-	Latency      *metrics.Histogram // See MethodLatencies.
-	BytesRequest *metrics.Histogram // See MethodBytesRequest.
-	BytesReply   *metrics.Histogram // See MethodBytesReply.
+	remote       bool
+	count        *metrics.Counter   // See MethodCounts.
+	errorCount   *metrics.Counter   // See MethodErrors.
+	latency      *metrics.Histogram // See MethodLatencies.
+	bytesRequest *metrics.Histogram // See MethodBytesRequest.
+	bytesReply   *metrics.Histogram // See MethodBytesReply.
 }
 
 // MethodMetricsFor returns metrics for the specified method.
 func MethodMetricsFor(labels MethodLabels) *MethodMetrics {
 	return &MethodMetrics{
-		Count:        MethodCounts.Get(labels),
-		ErrorCount:   MethodErrors.Get(labels),
-		Latency:      MethodLatencies.Get(labels),
-		BytesRequest: MethodBytesRequest.Get(labels),
-		BytesReply:   MethodBytesReply.Get(labels),
+		remote:       labels.Remote,
+		count:        methodCounts.Get(labels),
+		errorCount:   methodErrors.Get(labels),
+		latency:      methodLatencies.Get(labels),
+		bytesRequest: methodBytesRequest.Get(labels),
+		bytesReply:   methodBytesReply.Get(labels),
+	}
+}
+
+// MethodCallHandle holds information needed to finalize metric
+// updates for a method call.
+type MethodCallHandle struct {
+	start time.Time
+}
+
+// Begin starts metric update recording for a call to method m.
+func (m *MethodMetrics) Begin() MethodCallHandle {
+	return MethodCallHandle{time.Now()}
+}
+
+// End ends metric update recording for a call to method m.
+func (m *MethodMetrics) End(h MethodCallHandle, failed bool, requestBytes, replyBytes int) {
+	latency := time.Since(h.start).Microseconds()
+	m.count.Inc()
+	if failed {
+		m.errorCount.Inc()
+	}
+	m.latency.Put(float64(latency))
+	if m.remote {
+		m.bytesRequest.Put(float64(requestBytes))
+		m.bytesReply.Put(float64(replyBytes))
 	}
 }

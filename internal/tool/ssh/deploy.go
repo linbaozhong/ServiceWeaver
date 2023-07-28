@@ -32,13 +32,21 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/exp/maps"
 
+	"github.com/ServiceWeaver/weaver/internal/tool/config"
 	"github.com/ServiceWeaver/weaver/internal/tool/ssh/impl"
 	"github.com/ServiceWeaver/weaver/runtime"
+	"github.com/ServiceWeaver/weaver/runtime/bin"
 	"github.com/ServiceWeaver/weaver/runtime/codegen"
 	"github.com/ServiceWeaver/weaver/runtime/colors"
 	"github.com/ServiceWeaver/weaver/runtime/logging"
 	"github.com/ServiceWeaver/weaver/runtime/protos"
 	"github.com/ServiceWeaver/weaver/runtime/tool"
+	"github.com/ServiceWeaver/weaver/runtime/version"
+)
+
+const (
+	configKey      = "github.com/ServiceWeaver/weaver/ssh"
+	shortConfigKey = "ssh"
 )
 
 var deployCmd = tool.Command{
@@ -66,36 +74,71 @@ func deploy(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("load config file %q: %w", cfgFile, err)
 	}
+
+	// Parse and sanity-check the app config.
 	app, err := runtime.ParseConfig(cfgFile, string(cfg), codegen.ComponentConfigValidator)
 	if err != nil {
 		return fmt.Errorf("load config file %q: %w", cfgFile, err)
 	}
-
-	// Sanity check the config.
 	if _, err := os.Stat(app.Binary); errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("binary %q doesn't exist", app.Binary)
 	}
 
-	// Retrieve the list of locations to deploy.
-	locs, err := getLocations(app)
+	// Parse and finalize the SSH config.
+	config, err := config.GetDeployerConfig[impl.SshConfig, impl.SshConfig_ListenerOptions](configKey, shortConfigKey, app)
 	if err != nil {
 		return err
 	}
-
-	// Create a deployment.
-	dep := &protos.Deployment{
+	config.Deployment = &protos.Deployment{
 		Id:  uuid.New().String(),
 		App: app,
 	}
 
+	// Check version compatibility.
+	versions, err := bin.ReadVersions(app.Binary)
+	if err != nil {
+		return fmt.Errorf("read versions: %w", err)
+	}
+	if versions.DeployerVersion != version.DeployerVersion {
+		// Try to relativize the binary, defaulting to the absolute path if
+		// there are any errors..
+		binary := app.Binary
+		if cwd, err := os.Getwd(); err == nil {
+			if rel, err := filepath.Rel(cwd, app.Binary); err == nil {
+				binary = rel
+			}
+		}
+		return fmt.Errorf(`
+ERROR: The binary you're trying to deploy (%q) was built with
+github.com/ServiceWeaver/weaver module version %s. However, the 'weaver
+ssh' binary you're using was built with weaver module version %s.
+These versions are incompatible.
+
+We recommend updating both the weaver module your application is built with and
+updating the 'weaver ssh' command by running the following.
+
+    go get github.com/ServiceWeaver/weaver@latest
+    go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
+
+Then, re-build your code and re-run 'weaver ssh deploy'. If the problem
+persists, please file an issue at https://github.com/ServiceWeaver/weaver/issues.`,
+			binary, versions.ModuleVersion, version.ModuleVersion)
+	}
+
+	// Retrieve the list of locations to deploy.
+	locs, err := getLocations(config)
+	if err != nil {
+		return err
+	}
+
 	// Copy the binaries to each location.
-	locations, err := copyBinaries(locs, dep)
+	locations, err := copyBinaries(locs, config.Deployment)
 	if err != nil {
 		return err
 	}
 
 	// Run the manager.
-	stopFn, err := impl.RunManager(ctx, dep, locations)
+	stopFn, err := impl.RunManager(ctx, config, locations)
 	if err != nil {
 		return fmt.Errorf("cannot instantiate the manager: %w", err)
 	}
@@ -105,7 +148,7 @@ func deploy(ctx context.Context, args []string) error {
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-done // Will block here until user hits ctrl+c
-		if err := terminateDeployment(locs, dep); err != nil {
+		if err := terminateDeployment(locs, config.Deployment); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to terminate deployment: %v\n", err)
 		}
 		fmt.Fprintf(os.Stderr, "Application %s terminated\n", app.Name)
@@ -117,7 +160,7 @@ func deploy(ctx context.Context, args []string) error {
 
 	// Follow the logs.
 	source := logging.FileSource(impl.LogDir)
-	query := fmt.Sprintf(`full_version == %q && !("serviceweaver/system" in attrs)`, dep.Id)
+	query := fmt.Sprintf(`full_version == %q && !("serviceweaver/system" in attrs)`, config.Deployment.Id)
 	r, err := source.Query(ctx, query, true)
 	if err != nil {
 		return err
@@ -182,20 +225,8 @@ func terminateDeployment(locs []string, dep *protos.Deployment) error {
 }
 
 // getLocations returns the list of locations at which to deploy the application.
-func getLocations(app *protos.AppConfig) ([]string, error) {
-	// SSH config as found in TOML config file.
-	const sshKey = "github.com/ServiceWeaver/weaver/ssh"
-	const shortSSHKey = "ssh"
-
-	type sshConfigSchema struct {
-		LocationsFile string `toml:"locations_file"`
-	}
-	parsed := &sshConfigSchema{}
-	if err := runtime.ParseConfigSection(sshKey, shortSSHKey, app.Sections, parsed); err != nil {
-		return nil, fmt.Errorf("unable to parse ssh config: %w", err)
-	}
-
-	file, err := getAbsoluteFilePath(parsed.LocationsFile)
+func getLocations(config *impl.SshConfig) ([]string, error) {
+	file, err := getAbsoluteFilePath(config.Locations)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +242,7 @@ func getLocations(app *protos.AppConfig) ([]string, error) {
 	for fileScanner.Scan() {
 		loc := fileScanner.Text()
 		if _, ok := locations[loc]; ok {
-			return nil, fmt.Errorf("no duplicate locations allowed to deploy using the ssh deployer")
+			return nil, fmt.Errorf("duplicate locations in the locations file")
 		}
 		locations[loc] = true
 	}

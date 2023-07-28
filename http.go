@@ -15,10 +15,14 @@
 package weaver
 
 import (
+	"math/rand"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ServiceWeaver/weaver/metrics"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // TODO(mwhittaker): Measure the size of HTTP requests.
@@ -62,15 +66,17 @@ var (
 	)
 )
 
-// InstrumentHandler instruments the provided HTTP handler to maintain the
-// following metrics about HTTP request execution. Every metric is labelled
-// with the supplied label.
+// InstrumentHandler instruments the provided HTTP handler to collect sampled
+// traces and metrics of HTTP request executions. Each trace and metric is
+// labelled with the supplied label. The following metrics are collected:
 //
 //   - serviceweaver_http_request_count: Total number of requests.
 //   - serviceweaver_http_error_count: Total number of 4XX and 5XX replies.
 //   - serviceweaver_http_request_latency_micros: Execution latency in microseconds.
+//   - serviceweaver_http_request_bytes_received: Total number of request bytes.
+//   - serviceweaver_http_request_bytes_returned: Total number of response bytes
 func InstrumentHandler(label string, handler http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		// TODO(spetrovic): It is possible for the user to override r.Host
 		// and therefore get an incorrect host label attached here. Consider
@@ -98,12 +104,60 @@ func InstrumentHandler(label string, handler http.Handler) http.Handler {
 		}
 		httpRequestBytesReturned.Get(labels).Put(float64(writer.responseSize(r)))
 	})
+	const traceSampleInterval = 1 * time.Second
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	s := newTraceSampler(traceSampleInterval, rng)
+	return otelhttp.NewHandler(h, label, otelhttp.WithFilter(func(r *http.Request) bool {
+		return s.shouldTrace(time.Now())
+	}))
 }
 
 // InstrumentHandlerFunc is identical to [InstrumentHandler] but takes a
 // function instead of an http.Handler.
 func InstrumentHandlerFunc(label string, f func(http.ResponseWriter, *http.Request)) http.Handler {
 	return InstrumentHandler(label, http.HandlerFunc(f))
+}
+
+// traceSampler is a time-based request sampler for tracing.
+//
+// It allows at most one request to be traced during each time interval.
+type traceSampler struct {
+	intervalNs float64
+
+	mu               sync.Mutex
+	rng              *rand.Rand
+	nextSampleTimeNs atomic.Int64
+}
+
+// newTraceSampler returns a new traceSampler that allows at most one request
+// to be traced during each time interval.
+func newTraceSampler(interval time.Duration, rng *rand.Rand) *traceSampler {
+	return &traceSampler{
+		intervalNs: float64(interval / time.Nanosecond),
+		rng:        rng,
+	}
+}
+
+// shouldTrace returns true iff a request should be traced.
+func (s *traceSampler) shouldTrace(now time.Time) bool {
+	// Fast-path check avoids acquiring a mutex or modifying the sampler in any
+	// way.
+	nowNs := now.UnixNano()
+	if nowNs < s.nextSampleTimeNs.Load() {
+		return false
+	}
+
+	// Check again while holding the lock.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if nowNs < s.nextSampleTimeNs.Load() {
+		return false
+	}
+
+	// Pick a new value for nextSampleTime and return.
+	// We pick a random value in [0,s*s.intervalNs] (averages out to s.intervalNs).
+	s.nextSampleTimeNs.Store(nowNs + int64(2*s.rng.Float64()*s.intervalNs))
+	return true
 }
 
 // responseWriterInstrumenter is a wrapper around an http.ResponseWriter that

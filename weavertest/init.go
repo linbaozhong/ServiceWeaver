@@ -16,19 +16,18 @@ package weavertest
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"reflect"
 	"runtime"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/ServiceWeaver/weaver"
-	"github.com/ServiceWeaver/weaver/internal/private"
 	"github.com/ServiceWeaver/weaver/internal/reflection"
+	"github.com/ServiceWeaver/weaver/internal/weaver"
+	"github.com/ServiceWeaver/weaver/runtime/codegen"
 	"github.com/ServiceWeaver/weaver/runtime/logging"
+	"golang.org/x/exp/slices"
 )
 
 // Runner runs user-supplied testing code as a weaver application.
@@ -91,58 +90,8 @@ func Fake[T any](impl any) FakeComponent {
 	return FakeComponent{intf: t, impl: impl}
 }
 
-// private.App object per live test or benchmark.
-var (
-	appMu sync.Mutex
-	apps  map[testing.TB]private.App
-)
-
-func registerApp(t testing.TB, app private.App) {
-	appMu.Lock()
-	defer appMu.Unlock()
-	if apps == nil {
-		apps = map[testing.TB]private.App{}
-	}
-	apps[t] = app
-}
-
-func unregisterApp(t testing.TB, app private.App) {
-	appMu.Lock()
-	defer appMu.Unlock()
-	delete(apps, t)
-}
-
-func getApp(t testing.TB) private.App {
-	appMu.Lock()
-	defer appMu.Unlock()
-	return apps[t]
-}
-
-// ListenerAddress returns the address (of the form host:port) for the
-// listener with the specified name. This call will block waiting for
-// the listener to be initialized if necessary.
-func ListenerAddress(t testing.TB, name string) (string, error) {
-	app := getApp(t)
-	if app == nil {
-		return "", fmt.Errorf("Service Weaver application is not running")
-	}
-	return app.ListenerAddress(name)
-}
-
-//go:generate ../cmd/weaver/weaver generate
-
-// testMain is the component implementation used in tests.
-type testMain struct {
-	weaver.Implements[testMainInterface]
-}
-
-// testMainInterface is the alternative to weaver.Main we use so that
-// we do not conflict with any application provided implementation of
-// weaver.Main.
-type testMainInterface interface{}
-
-// Test runs a sub-test of t that tests supplied Service Weaver
-// application code.  It fails at runtime if body is not a function
+// Test runs a sub-test of t that tests the supplied Service Weaver
+// application code. It fails at runtime if body is not a function
 // whose signature looks like:
 //
 //	func(*testing.T, ComponentType1)
@@ -154,17 +103,23 @@ type testMainInterface interface{}
 // followed by a the list of components.
 //
 //	func TestFoo(t *testing.T) {
-//	    weavertest.Local.Test(t, func(t *testing.T, foo Foo, bar Bar) {
-//		// Test foo and bar ...
-//	    })
+//		weavertest.Local.Test(t, func(t *testing.T, foo Foo, bar *bar) {
+//			// Test foo and bar ...
+//		})
 //	}
+//
+// Component arguments can either be component interface types (e.g., Foo) or
+// component implementation pointer types (e.g., *bar).
+//
+// In contrast with weaver.Run, the Test method does not run the Main method of
+// any registered weaver.Main component.
 func (r Runner) Test(t *testing.T, body any) {
 	t.Helper()
 	t.Run(r.Name, func(t *testing.T) { r.sub(t, false, body) })
 }
 
-// Bench runs a sub-benchmark of b that benchmarks supplied Service
-// Weaver application code.  It fails at runtime if body is not a
+// Bench runs a sub-benchmark of b that benchmarks the supplied Service
+// Weaver application code. It fails at runtime if body is not a
 // function whose signature looks like:
 //
 //	func(*testing.B, ComponentType1)
@@ -176,12 +131,18 @@ func (r Runner) Test(t *testing.T, body any) {
 // followed by a the list of components.
 //
 //	func BenchmarkFoo(b *testing.B) {
-//	    weavertest.Local.Bench(b, func(b *testing.B, foo Foo) {
-//		for i := 0; i < b.N; i++ {
-//		    ... use foo ...
-//		}
-//	    })
+//		weavertest.Local.Bench(b, func(b *testing.B, foo Foo, bar *bar) {
+//			for i := 0; i < b.N; i++ {
+//				// Benchmark foo and bar ...
+//			}
+//		})
 //	}
+//
+// Component arguments can either be component interface types (e.g., Foo) or
+// component implementation pointer types (e.g., *bar).
+//
+// In contrast with weaver.Run, the Bench method does not run the Main method of
+// any registered weaver.Main component.
 func (r Runner) Bench(b *testing.B, testBody any) {
 	b.Helper()
 	b.Run(r.Name, func(b *testing.B) { r.sub(b, true, testBody) })
@@ -189,9 +150,21 @@ func (r Runner) Bench(b *testing.B, testBody any) {
 
 func (r Runner) sub(t testing.TB, isBench bool, testBody any) {
 	t.Helper()
-	runner, err := checkRunFunc(t, testBody)
+	body, intfs, err := checkRunFunc(t, testBody)
 	if err != nil {
 		t.Fatal(fmt.Errorf("weavertest.Run argument: %v", err))
+	}
+
+	// Assume a component Foo implementing struct foo. We disallow tests
+	// like the one below where the user provides a fake and a component
+	// implementation pointer for the same component.
+	//
+	//     runner.Fakes = append(runner.Fakes, weavertest.Fake[Foo](...))
+	//     runner.Test(t, func(t *testing.T, f *foo) {...})
+	for _, intf := range intfs {
+		if slices.ContainsFunc(r.Fakes, func(f FakeComponent) bool { return f.intf == intf }) {
+			t.Fatalf("Component %v has both fake and component implementation pointer", intf)
+		}
 	}
 
 	var cleanup func() error
@@ -215,97 +188,126 @@ func (r Runner) sub(t testing.TB, isBench bool, testBody any) {
 		}
 	}()
 
+	fakes := map[reflect.Type]any{}
+	for _, f := range r.Fakes {
+		fakes[f.intf] = f.impl
+	}
+
+	var runner weaver.Weavelet
 	if !r.multi && !r.forceRPC {
-		ctx = initSingleProcessLocal(ctx, r.Config)
-	} else {
-		logger := logging.NewTestLogger(t, testing.Verbose())
-		multiCtx, multiCleanup, err := initMultiProcess(ctx, t, isBench, r, logger.Log)
+		opts := weaver.SingleWeaveletOptions{
+			Fakes:  fakes,
+			Config: r.Config,
+			Quiet:  !testing.Verbose(),
+		}
+		var err error
+		runner, err = weaver.NewSingleWeavelet(ctx, codegen.Registered(), opts)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cleanup = multiCtx, multiCleanup
+	} else {
+		logger := logging.NewTestLogger(t, testing.Verbose())
+		bootstrap, multiCleanup, err := initMultiProcess(ctx, t, isBench, r, intfs, logger.Log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleanup = multiCleanup
+
+		opts := weaver.RemoteWeaveletOptions{Fakes: fakes}
+		runner, err = weaver.NewRemoteWeavelet(ctx, codegen.Registered(), bootstrap, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	if err := runWeaver(ctx, t, r, runner); err != nil {
+	if err := body(ctx, runner); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// checkRunFunc checks that the type of the function passed to
-// weavertest.Run is correct (its first argument matches t and its
-// remaining arguments are components). On success it returns a
-// function that gets the components and passes them to fn.
-func checkRunFunc(t testing.TB, fn any) (func(context.Context, private.App) error, error) {
+// checkRunFunc checks that the type of the function passed to weavertest.Run
+// is correct (its first argument matches t and its remaining arguments are
+// either component interfaces or pointer to component implementations). On
+// success it returns (1) a function that gets the components and passes them
+// to fn and (2) the interface types of the component implementation arguments.
+func checkRunFunc(t testing.TB, fn any) (func(context.Context, weaver.Weavelet) error, []reflect.Type, error) {
 	fnType := reflect.TypeOf(fn)
 	if fnType == nil || fnType.Kind() != reflect.Func {
-		return nil, fmt.Errorf("not a func")
+		return nil, nil, fmt.Errorf("not a func")
 	}
 	if fnType.IsVariadic() {
-		return nil, fmt.Errorf("must not be variadic")
+		return nil, nil, fmt.Errorf("must not be variadic")
 	}
 	n := fnType.NumIn()
 	if n < 2 {
-		return nil, fmt.Errorf("must have at least two args")
+		return nil, nil, fmt.Errorf("must have at least two args")
 	}
 	if fnType.NumOut() > 0 {
-		return nil, fmt.Errorf("must have no return outputs")
+		return nil, nil, fmt.Errorf("must have no return outputs")
 	}
-
 	if fnType.In(0) != reflect.TypeOf(t) {
-		return nil, fmt.Errorf("function first argument type %v does not match first weavertest.Run argument %T", fnType.In(0), t)
+		return nil, nil, fmt.Errorf("function first argument type %v does not match first weavertest.Run argument %T", fnType.In(0), t)
+	}
+	var intfs []reflect.Type
+	for i := 1; i < n; i++ {
+		switch fnType.In(i).Kind() {
+		case reflect.Interface:
+			// Do nothing.
+		case reflect.Pointer:
+			intf, err := extractComponentInterfaceType(fnType.In(i).Elem())
+			if err != nil {
+				return nil, nil, err
+			}
+			intfs = append(intfs, intf)
+		default:
+			return nil, nil, fmt.Errorf("function argument %d type %v must be a component interface or pointer to component implementation", i, fnType.In(i))
+		}
 	}
 
-	return func(ctx context.Context, app private.App) error {
+	return func(ctx context.Context, runner weaver.Weavelet) error {
 		args := make([]reflect.Value, n)
 		args[0] = reflect.ValueOf(t)
 		for i := 1; i < n; i++ {
 			argType := fnType.In(i)
-			comp, err := app.Get("weavertest.testMainInterface", argType)
-			if err != nil {
-				return err
+			switch argType.Kind() {
+			case reflect.Interface:
+				comp, err := runner.GetIntf(argType)
+				if err != nil {
+					return err
+				}
+				args[i] = reflect.ValueOf(comp)
+			case reflect.Pointer:
+				comp, err := runner.GetImpl(argType.Elem())
+				if err != nil {
+					return err
+				}
+				args[i] = reflect.ValueOf(comp)
+			default:
+				return fmt.Errorf("argument %v has unexpected type %v", i, argType)
 			}
-			args[i] = reflect.ValueOf(comp)
 		}
 		reflect.ValueOf(fn).Call(args)
 		return nil
-	}, nil
+	}, intfs, nil
 }
 
-func runWeaver(ctx context.Context, t testing.TB, runner Runner, body func(context.Context, private.App) error) error {
-	t.Helper()
-	opts := private.AppOptions{Fakes: map[reflect.Type]any{}}
-	for _, f := range runner.Fakes {
-		opts.Fakes[f.intf] = f.impl
+// extractComponentInterfaceType extracts the component interface type from the
+// provided component implementation. For example, calling
+// extractComponentInterfaceType on a struct that embeds weaver.Implements[Foo]
+// returns Foo.
+//
+// extractComponentInterfaceType returns an error if the provided type is not a
+// component implementation.
+func extractComponentInterfaceType(t reflect.Type) (reflect.Type, error) {
+	if t.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("type %v is not a struct", t)
 	}
-	app, err := private.Start(ctx, opts)
-	if err != nil {
-		return err
+	// See the definition of weaver.Implements.
+	f, ok := t.FieldByName("component_interface_type")
+	if !ok {
+		return nil, fmt.Errorf("type %v does not embed weaver.Implements", t)
 	}
-	registerApp(t, app)
-	t.Cleanup(func() { unregisterApp(t, app) })
-
-	// Run wait() in a go routine.
-	sub, cancel := context.WithCancel(ctx)
-	defer cancel()
-	result := make(chan error)
-	go func() { result <- app.Wait(sub) }()
-
-	// Run the test code.
-	if err := body(ctx, app); err != nil {
-		return err
-	}
-
-	// Wait for wait() to finish, but give up after a while in case user Main hangs.
-	cancel()
-	select {
-	case err := <-result:
-		if err != nil && !errors.Is(err, context.Canceled) {
-			t.Fatalf("weaver.Main.Main failure: %v", err)
-		}
-	case <-time.After(time.Millisecond * 100):
-		t.Log("weaver.Main.Main not exiting after cancellation")
-	}
-	return nil
+	return f.Type, nil
 }
 
 // logStacks prints the stacks of live goroutines. This functionality

@@ -23,12 +23,12 @@ import (
 	"html/template"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/ServiceWeaver/weaver/internal/traceio"
 	"github.com/ServiceWeaver/weaver/runtime/codegen"
 	"github.com/ServiceWeaver/weaver/runtime/logging"
 	"github.com/ServiceWeaver/weaver/runtime/metrics"
@@ -36,6 +36,7 @@ import (
 	imetrics "github.com/ServiceWeaver/weaver/runtime/prometheus"
 	protos "github.com/ServiceWeaver/weaver/runtime/protos"
 	dtool "github.com/ServiceWeaver/weaver/runtime/tool"
+	"github.com/ServiceWeaver/weaver/runtime/traces"
 	"github.com/pkg/browser"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -66,14 +67,15 @@ var (
 		"dec": func(x int) int {
 			return x - 1
 		},
-		"traceurl": func(app, version string) string {
-			v := url.Values{}
-			v.Set("app", app)
-			v.Set("version", version)
-			tracerURL := url.QueryEscape("http://127.0.0.1:9001?" + v.Encode())
-			return "https://ui.perfetto.dev/#!/?url=" + tracerURL
-		},
 	}).Parse(deploymentHTML))
+
+	//go:embed templates/traces.html
+	tracesHTML     string
+	tracesTemplate = template.Must(template.New("traces").Funcs(template.FuncMap{
+		"sub": func(endTime, startTime time.Time) string {
+			return endTime.Sub(startTime).String()
+		},
+	}).Parse(tracesHTML))
 
 	//go:embed assets/*
 	assets embed.FS
@@ -120,11 +122,18 @@ Flags:
 			if err != nil {
 				return err
 			}
-			dashboard := &dashboard{spec, r}
+			traceDB, err := traces.OpenDB(ctx, spec.PerfettoFile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "cannot open Perfetto database: %v\n", err)
+				traceDB = nil
+			}
+			dashboard := &dashboard{spec, r, traceDB}
 			http.HandleFunc("/", dashboard.handleIndex)
 			http.HandleFunc("/favicon.ico", http.NotFound)
 			http.HandleFunc("/deployment", dashboard.handleDeployment)
 			http.HandleFunc("/metrics", dashboard.handleMetrics)
+			http.HandleFunc("/traces", dashboard.handleTraces)
+			http.HandleFunc("/tracefetch", dashboard.handleTraceFetch)
 			http.Handle("/assets/", http.FileServer(http.FS(assets)))
 
 			lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *dashboardHost, *dashboardPort))
@@ -132,13 +141,6 @@ Flags:
 				return err
 			}
 			url := "http://" + lis.Addr().String()
-
-			traceDB, err := perfetto.Open(ctx, spec.PerfettoFile)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "cannot open Perfetto database: %v\n", err)
-			} else {
-				go traceDB.Serve(ctx)
-			}
 
 			fmt.Fprintln(os.Stderr, "Dashboard available at:", url)
 			go browser.OpenURL(url) //nolint:errcheck // browser open is optional
@@ -151,6 +153,7 @@ Flags:
 type dashboard struct {
 	spec     *DashboardSpec // e.g., "weaver multi" or "weaver single"
 	registry *Registry      // registry of deployments
+	traceDB  *traces.DB     // database that stores trace data
 }
 
 // handleIndex handles requests to /
@@ -259,7 +262,7 @@ func computeTraffic(status *Status, metrics []*protos.MetricSnapshot) []edge {
 	}
 	byPair := map[pair]int{}
 	for _, metric := range metrics {
-		if metric.Name != codegen.MethodCounts.Name() {
+		if metric.Name != codegen.MethodCountsName {
 			continue
 		}
 		call := pair{
@@ -310,4 +313,95 @@ func (d *dashboard) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	var b bytes.Buffer
 	imetrics.TranslateMetricsToPrometheusTextFormat(&b, snapshots, reg.Addr, prometheusEndpoint)
 	w.Write(b.Bytes()) //nolint:errcheck // response write error
+}
+
+// handleTraces handles requests to /traces?id=<deployment id>
+func (d *dashboard) handleTraces(w http.ResponseWriter, r *http.Request) {
+	if d.traceDB == nil {
+		http.Error(w, "trace database cannot be opened", http.StatusInternalServerError)
+		return
+	}
+	// TODO(mwhittaker): Change to /<deployment id>/traces?
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "no deployment id provided", http.StatusBadRequest)
+		return
+	}
+	parseDuration := func(arg string) (time.Duration, bool) {
+		str := r.URL.Query().Get(arg)
+		if str == "" {
+			return 0, true
+		}
+		dur, err := time.ParseDuration(str)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid duration %q", str), http.StatusBadRequest)
+			return 0, false
+		}
+		return dur, true
+	}
+	latencyLower, ok := parseDuration("lat_low")
+	if !ok {
+		return
+	}
+	latencyUpper, ok := parseDuration("lat_hi")
+	if !ok {
+		return
+	}
+	onlyErrors := r.URL.Query().Get("errs") != ""
+
+	// Weavelets export traces every 5 seconds. In order to (semi-)guarantee
+	// that the database contains all spans for the selected traces, we only
+	// fetch traces that ended more than 5+ seconds ago (all spans for such
+	// traces should have been exported to the database by now).
+	const gracePeriod = time.Second
+	endTime := time.Now().Add(-1 * (traceio.ExportInterval + gracePeriod))
+
+	const maxNumTraces = 100
+	ts, err := d.traceDB.QueryTraces(r.Context(), "" /*app*/, id, time.Time{} /*startTime*/, endTime, latencyLower, latencyUpper, onlyErrors, maxNumTraces)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot query trace database: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	content := struct {
+		Tool   string
+		ID     string
+		Traces []traces.TraceSummary
+	}{
+		Tool:   d.spec.Tool,
+		ID:     id,
+		Traces: ts,
+	}
+	if err := tracesTemplate.Execute(w, content); err != nil {
+		http.Error(w, fmt.Sprintf("cannot display traces: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
+// handleTraceFetch handles requests to /tracefetch?trace_id=<trace_id>.
+func (d *dashboard) handleTraceFetch(w http.ResponseWriter, r *http.Request) {
+	if d.traceDB == nil {
+		http.Error(w, "cannot open trace database", http.StatusInternalServerError)
+		return
+	}
+	traceID := r.URL.Query().Get("trace_id")
+	if traceID == "" {
+		http.Error(w, fmt.Sprintf("invalid trace id %q", traceID), http.StatusBadRequest)
+		return
+	}
+	spans, err := d.traceDB.FetchSpans(r.Context(), traceID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot fetch spans: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if len(spans) == 0 {
+		http.Error(w, "no matching spans", http.StatusNotFound)
+		return
+	}
+	data, err := perfetto.EncodeSpans(spans)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot encode spans: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Write(data) //nolint:errcheck // response write error
 }

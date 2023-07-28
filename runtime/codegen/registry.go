@@ -53,13 +53,14 @@ type registry struct {
 
 // Registration is the configuration needed to register a Service Weaver component.
 type Registration struct {
-	Name   string       // full package-prefixed component name
-	Iface  reflect.Type // interface type for the component
-	Impl   reflect.Type // implementation type (struct)
-	Routed bool         // True if calls to this component should be routed
+	Name      string       // full package-prefixed component name
+	Iface     reflect.Type // interface type for the component
+	Impl      reflect.Type // implementation type (struct)
+	Routed    bool         // True if calls to this component should be routed
+	Listeners []string     // the names of any weaver.Listeners
 
 	// Functions that return different types of stubs.
-	LocalStubFn  func(impl any, tracer trace.Tracer) any
+	LocalStubFn  func(impl any, caller string, tracer trace.Tracer) any
 	ClientStubFn func(stub Stub, caller string) any
 	ServerStubFn func(impl any, load func(key uint64, load float64)) Server
 
@@ -148,15 +149,15 @@ func ComponentConfigValidator(path, cfg string) error {
 		// Not for a known component.
 		return nil
 	}
-	objConfig := config.Config(reflect.New(info.Impl))
-	if objConfig == nil {
+	componentConfig := config.Config(reflect.New(info.Impl))
+	if componentConfig == nil {
 		return fmt.Errorf("unexpected configuration for component %v "+
 			"that does not support configuration (add a "+
 			"weaver.WithConfig[configType] embedded field to %v)",
 			info.Name, info.Iface)
 	}
 	config := &protos.AppConfig{Sections: map[string]string{path: cfg}}
-	if err := runtime.ParseConfigSection(path, "", config.Sections, objConfig); err != nil {
+	if err := runtime.ParseConfigSection(path, "", config.Sections, componentConfig); err != nil {
 		return fmt.Errorf("%v: bad config: %w", info.Iface, err)
 	}
 	return nil

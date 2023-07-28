@@ -2,17 +2,21 @@
 binary = "./collatz"
 rollout = "5m"
 
-[listeners]
-collatz = {local_address = "localhost:9000"}
+[single]
+listeners.collatz = {address = "localhost:9000"}
+
+[multi]
+listeners.collatz = {address = "localhost:9000"}
 
 [ssh]
-locations_file = "./ssh_locations.txt"
+listeners.collatz = {address = "localhost:9000"}
+locations = "./ssh_locations.txt"
 
 [gke]
 regions = ["us-west1"]
-public_listener = [
-  {name = "collatz", hostname = "collatz.example.com"},
-]
+listeners.collatz = {public_hostname = "collatz.example.com"}
 
 [kube]
-public_listeners = [{name = "collatz"}]
+listeners.collatz = {public = true}
+# To upload the image to another registry, check `weaver kube deploy -h`.
+image = "docker.io/my_docker_hub_username/collatz"

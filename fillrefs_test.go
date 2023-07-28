@@ -45,11 +45,11 @@ func TestFillRefs(t *testing.T) {
 	if err := fillRefs(&x, getValue); err != nil {
 		t.Fatal(err)
 	}
-	if x.a.value != 42 {
-		t.Errorf("expecting x.a to be 42, got %d", x.a.value)
+	if x.a.Get() != 42 {
+		t.Errorf("expecting x.a to be 42, got %d", x.a.Get())
 	}
-	if x.b.value != "hello" {
-		t.Errorf("expecting x.b to be `hello`, got %s", x.b.value)
+	if x.b.Get() != "hello" {
+		t.Errorf("expecting x.b to be `hello`, got %s", x.b.Get())
 	}
 }
 

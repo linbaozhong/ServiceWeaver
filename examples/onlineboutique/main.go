@@ -26,18 +26,17 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
-	"os"
+	"log"
 
 	"github.com/ServiceWeaver/weaver"
+	"github.com/ServiceWeaver/weaver/examples/onlineboutique/frontend"
 )
 
 //go:generate ../../cmd/weaver/weaver generate ./...
 
 func main() {
 	flag.Parse()
-	if err := weaver.Run(context.Background()); err != nil {
-		fmt.Fprintln(os.Stderr, "Error creating frontend: ", err)
-		os.Exit(1)
+	if err := weaver.Run(context.Background(), frontend.Serve); err != nil {
+		log.Fatal(err)
 	}
 }

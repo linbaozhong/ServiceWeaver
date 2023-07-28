@@ -32,8 +32,8 @@ import (
 	"github.com/ServiceWeaver/weaver/internal/routing"
 	"github.com/ServiceWeaver/weaver/runtime"
 	"github.com/ServiceWeaver/weaver/runtime/metrics"
-	"github.com/ServiceWeaver/weaver/runtime/perfetto"
 	"github.com/ServiceWeaver/weaver/runtime/protos"
+	"github.com/ServiceWeaver/weaver/runtime/traces"
 	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
 	"golang.org/x/exp/slog"
@@ -42,13 +42,11 @@ import (
 	"github.com/ServiceWeaver/weaver/internal/proto"
 	"github.com/ServiceWeaver/weaver/internal/proxy"
 	"github.com/ServiceWeaver/weaver/internal/status"
-	"github.com/ServiceWeaver/weaver/internal/traceio"
 	"github.com/ServiceWeaver/weaver/internal/versioned"
 	"github.com/ServiceWeaver/weaver/runtime/logging"
 	"github.com/ServiceWeaver/weaver/runtime/protomsg"
 	"github.com/ServiceWeaver/weaver/runtime/retry"
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel/sdk/trace"
 )
 
 const (
@@ -74,7 +72,7 @@ var (
 	LogDir       = filepath.Join(runtime.LogsDir(), "ssh")
 	dataDir      = filepath.Join(must.Must(runtime.DataDir()), "ssh")
 	registryDir  = filepath.Join(dataDir, "registry")
-	PerfettoFile = filepath.Join(dataDir, "perfetto.db")
+	PerfettoFile = filepath.Join(dataDir, "traces.DB")
 )
 
 // manager manages an application version deployment across a set of locations,
@@ -85,7 +83,7 @@ var (
 // duplicated code.
 type manager struct {
 	ctx        context.Context
-	dep        *protos.Deployment
+	config     *SshConfig
 	logger     *slog.Logger
 	mgrAddress string // manager address
 	registry   *status.Registry
@@ -150,7 +148,8 @@ type groupReplicaInfo struct {
 var _ status.Server = &manager{}
 
 // RunManager creates and runs a new manager.
-func RunManager(ctx context.Context, dep *protos.Deployment, locations map[string]string) (func() error, error) {
+func RunManager(ctx context.Context, config *SshConfig, locations map[string]string) (func() error, error) {
+	dep := config.Deployment
 	// Create log saver.
 	fs, err := logging.NewFileStore(LogDir)
 	if err != nil {
@@ -169,16 +168,12 @@ func RunManager(ctx context.Context, dep *protos.Deployment, locations map[strin
 	})
 
 	// Create the trace saver.
-	traceDB, err := perfetto.Open(ctx, PerfettoFile)
+	traceDB, err := traces.OpenDB(ctx, PerfettoFile)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open Perfetto database: %w", err)
 	}
 	traceSaver := func(spans *protos.TraceSpans) error {
-		var traces []trace.ReadOnlySpan
-		for _, span := range spans.Span {
-			traces = append(traces, &traceio.ReadSpan{Span: span})
-		}
-		return traceDB.Store(ctx, dep.App.Name, dep.Id, traces)
+		return traceDB.Store(ctx, dep.App.Name, dep.Id, spans)
 	}
 
 	// Form co-location.
@@ -192,7 +187,7 @@ func RunManager(ctx context.Context, dep *protos.Deployment, locations map[strin
 	// Create the manager.
 	m := &manager{
 		ctx:            ctx,
-		dep:            dep,
+		config:         config,
 		locations:      locations,
 		logger:         logger,
 		logSaver:       logSaver,
@@ -233,7 +228,7 @@ func RunManager(ctx context.Context, dep *protos.Deployment, locations map[strin
 	}()
 
 	return func() error {
-		return m.registry.Unregister(m.ctx, m.dep.Id)
+		return m.registry.Unregister(m.ctx, dep.Id)
 	}, nil
 }
 
@@ -284,8 +279,8 @@ func (m *manager) run() error {
 	}
 	m.registry = registry
 	reg := status.Registration{
-		DeploymentId: m.dep.Id,
-		App:          m.dep.App.Name,
+		DeploymentId: m.config.Deployment.Id,
+		App:          m.config.Deployment.App.Name,
 		Addr:         lis.Addr().String(),
 	}
 	fmt.Fprint(os.Stderr, reg.Rolodex())
@@ -371,13 +366,14 @@ func (m *manager) Status(ctx context.Context) (*status.Status, error) {
 			Addr: proxy.addr,
 		})
 	}
+	dep := m.config.Deployment
 	return &status.Status{
-		App:            m.dep.App.Name,
-		DeploymentId:   m.dep.Id,
+		App:            dep.App.Name,
+		DeploymentId:   dep.Id,
 		SubmissionTime: timestamppb.New(m.started),
 		Components:     components,
 		Listeners:      listeners,
-		Config:         m.dep.App,
+		Config:         dep.App,
 	}, nil
 }
 
@@ -509,8 +505,8 @@ func (m *manager) exportListener(_ context.Context, req *protos.ExportListenerRe
 	// Get the proxy address. It should be the same as the LocalAddress field
 	// in the options for this listener, if any was specified.
 	var proxyAddr string
-	if opts, ok := m.dep.App.ListenerOptions[req.Listener]; ok {
-		proxyAddr = opts.LocalAddress
+	if opts, ok := m.config.Listeners[req.Listener]; ok {
+		proxyAddr = opts.Address
 	}
 
 	lis, err := net.Listen("tcp", proxyAddr)
@@ -593,7 +589,7 @@ func (m *manager) startColocationGroup(g *group, runMain bool) error {
 	for loc := range m.locations {
 		info := &BabysitterInfo{
 			ManagerAddr: m.mgrAddress,
-			Deployment:  m.dep,
+			Deployment:  m.config.Deployment,
 			Group:       g.name,
 			ReplicaId:   int32(replicaId),
 			LogDir:      LogDir,

@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"sync"
 
 	"github.com/ServiceWeaver/weaver/internal/envelope/conn"
@@ -26,7 +27,6 @@ import (
 	"github.com/ServiceWeaver/weaver/runtime/envelope"
 	"github.com/ServiceWeaver/weaver/runtime/protos"
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel/sdk/trace"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 )
@@ -101,8 +101,10 @@ type connection struct {
 
 var _ envelope.EnvelopeHandler = &handler{}
 
-// newDeployer returns a new weavertest multiprocess deployer.
-func newDeployer(ctx context.Context, wlet *protos.EnvelopeInfo, config *protos.AppConfig, runner Runner, logWriter func(*protos.LogEntry)) *deployer {
+// newDeployer returns a new weavertest multiprocess deployer. locals contains
+// components that should be co-located with the main component and not
+// replicated.
+func newDeployer(ctx context.Context, wlet *protos.EnvelopeInfo, config *protos.AppConfig, runner Runner, locals []reflect.Type, logWriter func(*protos.LogEntry)) *deployer {
 	colocation := map[string]string{}
 	for _, group := range config.Colocate {
 		for _, c := range group.Components {
@@ -122,8 +124,10 @@ func newDeployer(ctx context.Context, wlet *protos.EnvelopeInfo, config *protos.
 		log:        logWriter,
 	}
 
-	// Force testMain to be local.
-	d.local["github.com/ServiceWeaver/weaver/weavertest/testMainInterface"] = true
+	for _, local := range locals {
+		name := fmt.Sprintf("%s/%s", local.PkgPath(), local.Name())
+		d.local[name] = true
+	}
 
 	// Fakes need to be local as well.
 	for _, fake := range runner.Fakes {
@@ -134,7 +138,7 @@ func newDeployer(ctx context.Context, wlet *protos.EnvelopeInfo, config *protos.
 	return d
 }
 
-func (d *deployer) start() error {
+func (d *deployer) start() (runtime.Bootstrap, error) {
 	// Set up the pipes between the envelope and the main weavelet. The
 	// pipes will be closed by the envelope and weavelet conns.
 	//
@@ -145,11 +149,11 @@ func (d *deployer) start() error {
 	//                         └────┘
 	fromWeaveletReader, fromWeaveletWriter, err := os.Pipe()
 	if err != nil {
-		return fmt.Errorf("cannot create fromWeavelet pipe: %v", err)
+		return runtime.Bootstrap{}, fmt.Errorf("cannot create fromWeavelet pipe: %v", err)
 	}
 	toWeaveletReader, toWeaveletWriter, err := os.Pipe()
 	if err != nil {
-		return fmt.Errorf("cannot create toWeavelet pipe: %v", err)
+		return runtime.Bootstrap{}, fmt.Errorf("cannot create toWeavelet pipe: %v", err)
 	}
 	// Run an envelope connection to the main co-location group.
 	wlet := &protos.EnvelopeInfo{
@@ -159,12 +163,10 @@ func (d *deployer) start() error {
 		Sections:      d.wlet.Sections,
 		SingleProcess: d.wlet.SingleProcess,
 		SingleMachine: d.wlet.SingleMachine,
-		RunMain:       true,
 	}
 	bootstrap := runtime.Bootstrap{
 		ToWeaveletFile: toWeaveletReader,
 		ToEnvelopeFile: fromWeaveletWriter,
-		TestConfig:     d.runner.Config,
 	}
 	d.ctx = context.WithValue(d.ctx, runtime.BootstrapKey{}, bootstrap)
 
@@ -196,7 +198,7 @@ func (d *deployer) start() error {
 			d.stopLocked(fmt.Errorf(`cannot register the replica for "main": %w`, err))
 		}
 	}()
-	return nil
+	return bootstrap, nil
 }
 
 // stop stops the deployer.
@@ -236,7 +238,7 @@ func (d *deployer) HandleLogEntry(_ context.Context, entry *protos.LogEntry) err
 }
 
 // HandleTraceSpans implements the envelope.EnvelopeHandler interface.
-func (d *deployer) HandleTraceSpans(context.Context, []trace.ReadOnlySpan) error {
+func (d *deployer) HandleTraceSpans(context.Context, *protos.TraceSpans) error {
 	// Ignore traces.
 	return nil
 }

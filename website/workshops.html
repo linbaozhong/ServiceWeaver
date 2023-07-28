@@ -15,43 +15,79 @@
 -->
 
 <p>
-  We're hosting a number of workshops where you can get hands-on experience writing Service Weaver apps.
-  Use the links below to sign up.
+  We're hosting a number of workshops where you can get hands-on experience writing Service Weaver apps with guidance from an instructor. Use the links below to sign up. All the workshop materials are also <a href="https://github.com/serviceweaver/workshops">available online</a>, so you can complete the workshop on your own.
 <p>
 
 <p>
-  <i>Please reach out to us if you're interested in hosting a Service Weaver workshop in your city or institution!</i>
+  <em>Please reach out to us if you're interested in hosting a Service Weaver workshop in your city or institution!</em>
 </p>
 
 <table id="workshops" class="workshops-table"></table>
 
 <script>
   document.addEventListener('DOMContentLoaded', () => {
+    const JANUARY = 0;
+    const FEBRUARY = 1;
+    const MARCH = 2;
+    const APRIL = 3;
+    const MAY = 4;
+    const JUNE = 5;
+    const JULY = 6;
+    const AUGUST = 7;
+    const SEPTEMBER = 8;
+    const OCTOBER = 9;
+    const NOVEMBER = 10;
+    const DECEMBER = 11;
     const items = [
       {
-        date: new Date('2023-06-27'),
+        date: new Date(2023, JUNE, 27),
         location: 'Berlin',
-        link: '<a href="https://gdg.community.dev/events/details/google-gdg-berlin-golang-presents-service-weaver-workshop/">Register</a>',
+        register: '<a href="https://gdg.community.dev/events/details/google-gdg-berlin-golang-presents-service-weaver-workshop/">GDG Berlin Golang</a>',
       },
       {
-        date: new Date('2023-06-30'),
+        date: new Date(2023, JUNE, 30),
         location: 'Zurich',
-        link: '<a href="https://gdg.community.dev/events/details/google-gdg-zurich-presents-service-weaver-workshop/">Register</a>',
+        register: '<a href="https://gdg.community.dev/events/details/google-gdg-zurich-presents-service-weaver-workshop/">GDG Zurich</a>, <a href="https://www.meetup.com/zurich-gophers/events/294260278">Zurich Gophers</a>',
       },
       {
-        date: new Date('2023-08-15'),
+        date: new Date(2023, JULY, 27),
+        location: 'San Francisco',
+        register: '<a href="https://gdg.community.dev/events/details/google-gdg-san-francisco-presents-service-weaver-workshop-in-person/cohost-gdg-san-francisco">GDG San Francisco</a>, <a href="https://www.aicamp.ai/event/eventdetails/W2023072718">AICamp SF</a>',
+      },
+      {
+        date: new Date(2023, AUGUST, 15),
         location: 'Dublin',
-        link: 'TBA',
+        register: '<a href="https://gdg.community.dev/events/details/google-gdg-dublin-presents-workshop-on-service-weaver-by-robert-grandl-google-dublin/">GDG Dublin</a>',
       },
       {
-        date: new Date('2023-08-16'),
+        date: new Date(2023, AUGUST, 16),
         location: 'London',
-        link: 'TBA',
+        register: '<a href="https://gdg.community.dev/events/details/google-gdg-cloud-london-presents-workshop-on-service-weaver-by-robert-grandl-google-london/">GDG Cloud London</a>',
       },
       {
-        date: new Date('2023-08-18'),
+        date: new Date(2023, AUGUST, 17),
+        location: 'Sunnyvale',
+        register: '<a href="https://gdg.community.dev/events/details/google-gdg-silicon-valley-presents-service-weaver-workshop-in-person/">GDG Silicon Valley</a>',
+      },
+      {
+        date: new Date(2023, AUGUST, 18),
         location: 'Paris',
-        link: 'TBA',
+        register: '<a href="https://gdg.community.dev/events/details/google-gdg-paris-presents-workshop-on-service-weaver-by-robert-grandl-google-paris/">GDG Paris</a>',
+      },
+      {
+        date: new Date(2023, SEPTEMBER, 18),
+        location: 'Copenhagen',
+        register: 'TBA',
+      },
+      {
+        date: new Date(2023, SEPTEMBER, 19),
+        location: 'Oslo',
+        register: 'TBA',
+      },
+      {
+        date: new Date(2023, SEPTEMBER, 20),
+        location: 'Stockholm',
+        register: 'TBA',
       },
     ];
 
@@ -81,8 +117,19 @@
       itemRow.appendChild(itemCellLoc)
 
       const itemCellLink = document.createElement("td")
-      itemCellLink.innerHTML = item.link
+      itemCellLink.innerHTML = item.register
       itemRow.appendChild(itemCellLink)
     }
   });
 </script>
+
+<h1>Partners</h1>
+
+<div id="partners">
+  <a href="https://gdg.community.dev/" class="partner_logo">
+    <img src="assets/images/GDG_logo.png" alt="GDG logo">
+  </a>
+  <a href="https://www.aicamp.ai/" class="partner_logo">
+    <img src="assets/images/aicamp_logo.png" alt="AI Camp logo">
+  </a>
+</div>

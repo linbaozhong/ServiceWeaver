@@ -42,7 +42,6 @@ import (
 	"github.com/ServiceWeaver/weaver/runtime/retry"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -87,7 +86,7 @@ func TestMain(m *testing.M) {
 				return nil
 			},
 			"writetraces": func() error { return writeTraces(conn) },
-			"serve_conn":  func() error { return conn.Serve() },
+			"serve_conn":  func() error { return conn.Serve(nil) },
 		}
 		fn, ok := cmds[cmd]
 		if !ok {
@@ -100,7 +99,7 @@ func TestMain(m *testing.M) {
 			fmt.Fprintf(os.Stderr, "subprocess: %v\n", err)
 			os.Exit(1)
 		}
-		conn.Serve()
+		conn.Serve(nil)
 	}
 
 	var err error
@@ -148,11 +147,11 @@ type handlerForTest struct {
 
 var _ EnvelopeHandler = &handlerForTest{}
 
-func (h *handlerForTest) HandleTraceSpans(_ context.Context, spans []sdktrace.ReadOnlySpan) error {
+func (h *handlerForTest) HandleTraceSpans(_ context.Context, spans *protos.TraceSpans) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for _, span := range spans {
-		h.traces = append(h.traces, span.Name())
+	for _, span := range spans.Span {
+		h.traces = append(h.traces, span.Name)
 	}
 	return nil
 }
@@ -336,32 +335,32 @@ func createWeaveletConn() (*conn.WeaveletConn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable make weavelet<->envelope pipes: %w", err)
 	}
-	return conn.NewWeaveletConn(toWeavelet, toEnvelope, nil /*handler*/)
+	return conn.NewWeaveletConn(toWeavelet, toEnvelope)
 }
 
 func writeTraces(conn *conn.WeaveletConn) error {
 	w := traceio.NewWriter(conn.SendTraceSpans)
 	defer w.Shutdown(context.Background())
 
-	span := func(name string) sdktrace.ReadOnlySpan {
+	span := func(name string) *protos.Span {
 		rnd := uuid.New()
-		return &traceio.ReadSpan{Span: &protos.Span{
+		return &protos.Span{
 			Name:         name,
 			TraceId:      rnd[:16],
 			SpanId:       rnd[:8],
 			ParentSpanId: rnd[:8],
-		}}
+		}
 	}
-	if err := w.ExportSpans(context.Background(), []sdktrace.ReadOnlySpan{
+	if err := w.ExportSpansProto(&protos.TraceSpans{Span: []*protos.Span{
 		span("span1"),
 		span("span2"),
-	}); err != nil {
+	}}); err != nil {
 		return err
 	}
-	if err := w.ExportSpans(context.Background(), []sdktrace.ReadOnlySpan{
+	if err := w.ExportSpansProto(&protos.TraceSpans{Span: []*protos.Span{
 		span("span3"),
 		span("span4"),
-	}); err != nil {
+	}}); err != nil {
 		return err
 	}
 	return nil
@@ -552,7 +551,7 @@ func register[Intf, Impl any](name string) {
 		Name:         name,
 		Iface:        reflection.Type[Intf](),
 		Impl:         reflect.TypeOf(zero),
-		LocalStubFn:  func(any, trace.Tracer) any { return nil },
+		LocalStubFn:  func(any, string, trace.Tracer) any { return nil },
 		ClientStubFn: func(codegen.Stub, string) any { return nil },
 		ServerStubFn: func(any, func(uint64, float64)) codegen.Server { return nil },
 	})

@@ -21,6 +21,7 @@ import (
 
 	"github.com/ServiceWeaver/weaver/internal/must"
 	"github.com/ServiceWeaver/weaver/internal/status"
+	itool "github.com/ServiceWeaver/weaver/internal/tool"
 	"github.com/ServiceWeaver/weaver/runtime"
 	"github.com/ServiceWeaver/weaver/runtime/tool"
 )
@@ -29,7 +30,7 @@ var (
 	// The directories and files where the single process deployer stores data.
 	dataDir      = filepath.Join(must.Must(runtime.DataDir()), "single")
 	RegistryDir  = filepath.Join(dataDir, "registry")
-	PerfettoFile = filepath.Join(dataDir, "perfetto.db")
+	PerfettoFile = filepath.Join(dataDir, "traces.DB")
 
 	dashboardSpec = &status.DashboardSpec{
 		Tool:         "weaver single",
@@ -55,7 +56,7 @@ var (
 		"metrics":   status.MetricsCommand("weaver single", defaultRegistry),
 		"profile":   status.ProfileCommand("weaver single", defaultRegistry),
 		"purge":     tool.PurgeCmd(purgeSpec),
-		"version":   tool.VersionCmd("weaver single"),
+		"version":   itool.VersionCmd("weaver single"),
 	}
 )
 

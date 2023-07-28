@@ -110,7 +110,7 @@ tutorial can be found [here][hello_app].
 ## Components
 
 Service Weaver's core abstraction is the **component**. A component is like an
-[actor][actors], and a Service Weaver application is implemented of a set of
+[actor][actors], and a Service Weaver application is implemented as a set of
 components. Concretely, a component is represented with a regular Go
 [interface][go_interfaces], and components interact with each other by calling
 the methods defined by these interfaces.
@@ -144,27 +144,27 @@ import (
 )
 
 func main() {
-    if err := weaver.Run(context.Background()); err != nil {
+    if err := weaver.Run(context.Background(), serve); err != nil {
         log.Fatal(err)
     }
 }
 
 // app is the main component of the application. weaver.Run creates
-// it and calls its Main method.
+// it and passes it to serve.
 type app struct{
     weaver.Implements[weaver.Main]
 }
 
-// Main is called by weaver.Run and contains the body of the application.
-func (*app) Main(context.Context) error {
+// serve is called by weaver.Run and contains the body of the application.
+func serve(context.Context, *app) error {
     fmt.Println("Hello")
     return nil
 }
 ```
 
-`weaver.Run` initializes and runs the Service Weaver application.  In
-particular, `weaver.Run` finds the main component, creates it, and calls its
-Main method. In this example,`app` is the main component since it
+`weaver.Run(...)` initializes and runs the Service Weaver application. In
+particular, `weaver.Run` finds the main component, creates it, and passes it to
+a supplied function. In this example,`app` is the main component since it
 contains a `weaver.Implements[weaver.Main]` field.
 
 `weaver.Run` 初始化并运行Service Weaver应用程序。尤其是，`weaver.Run` 找到主组件，创建它，并调用它的 Main 方法。在这个例子中，`app`是主要组件，因为它包含了一个 `weaver.Implements[weaver.Main]` 域。
@@ -262,7 +262,7 @@ import (
 )
 
 func main() {
-    if err := weaver.Run(context.Background()); err != nil {
+    if err := weaver.Run(context.Background(), serve); err != nil {
         log.Fatal(err)
     }
 }
@@ -272,7 +272,7 @@ type app struct{
     reverser weaver.Ref[Reverser]
 }
 
-func (app *app) Main(ctx context.Context) error {
+func serve(ctx context.Context, app *app) error {
     // Call the Reverse method.
     var r Reverser = app.reverser.Get()
     reversed, err := r.Reverse(ctx, "!dlroW ,olleH")
@@ -324,7 +324,7 @@ import (
 )
 
 func main() {
-    if err := weaver.Run(context.Background()); err != nil {
+    if err := weaver.Run(context.Background(), serve); err != nil {
         log.Fatal(err)
     }
 }
@@ -335,7 +335,7 @@ type app struct {
     hello    weaver.Listener
 }
 
-func (app *app) Main(ctx context.Context) error {
+func serve(ctx context.Context, app *app) error {
     // The hello listener will listen on a random port chosen by the operating
     // system. This behavior can be changed in the config file.
     fmt.Printf("hello listener available on %v\n", app.hello)
@@ -375,8 +375,20 @@ we create a [TOML](https://toml.io) config file named `weaver.toml` with
 the following contents:
 
 ```toml
-[listeners]
-hello = {local_address = "localhost:12345"}
+[single]
+listeners.hello = {address = "localhost:12345"}
+```
+
+Note that the name of the listener, `hello` in this case, is derived from the
+field name. You can override this behavior and specify a specific listener name
+using a `"weaver"` field tag like this:
+
+```go
+type app struct {
+    weaver.Implements[weaver.Main]
+    reverser weaver.Ref[Reverser]
+    hello    weaver.Listener `weaver:"my_custom_listener_name"`
+}
 ```
 
 Run `go mod tidy` and then `SERVICEWEAVER_CONFIG=weaver.toml go run .`.
@@ -454,8 +466,8 @@ run`在单个进程中运行Service Weaver应用程序。现在，我们将在�
 [serviceweaver]
 binary = "./hello"
 
-[listeners]
-hello = {local_address = "localhost:12345"}
+[multi]
+listeners.hello = {address = "localhost:12345"}
 ```
 
 This config file specifies the binary of the Service Weaver application, as
@@ -568,18 +580,31 @@ Cloud Tracing][cloud_trace], etc.
 
 ## Next Steps
 
-- Continue reading to get a better understanding of [components](#components)
-  and learn about other fundamental features of Service Weaver like
-  [logging](#logging), [metrics](#metrics), [routing](#routing), and so on.
+- Work through the exercises in our [codelab](#codelab) to get experience
+  writing Service Weaver apps.
+- Continue reading the docs to get a better understanding of
+  [components](#components) and learn about other fundamental features of
+  Service Weaver like [logging](#logging), [metrics](#metrics),
+  [routing](#routing), and so on.
+- Read [our blog](/blog).
+- Read through [example Service Weaver applications][weaver_examples] that
+  demonstrate what Service Weaver has to offer.
 - Dive deeper into the various ways you can deploy a Service Weaver application,
   including [single process](#single-process), [multiprocess](#multiprocess),
   and [GKE](#gke) deployers.
-- Read through [example Service Weaver applications][weaver_examples] that
-  demonstrate what Service Weaver has to offer.
 - Check out [Service Weaver's source code on GitHub][weaver_github].
-- Read [our blog](/blog).
 - Chat with us on [Discord](https://discord.gg/FzbQ3SM8R5) or send us an
   [email](serviceweaver@google.com).
+
+# Codelab
+
+Check out the [Service Weaver codelab][workshop] hosted on GitHub. The codelab
+includes a set of exercises (with solutions) that walk you through the
+implementation of [an emoji search engine application][emojis] backed by
+ChatGPT. The [Step by Step Tutorial](#step-by-step-tutorial) section walked you
+through the fundamentals of Service Weaver, and the codelab puts these
+fundamentals to practice, giving you hands-on experience writing fully fledged
+Service Weaver applications.
 
 # Components
 
@@ -679,12 +704,6 @@ type foo struct{
 -   It must embed a `weaver.Implements[T]` field where `T` is the component
     interface it implements.
 - 它必须嵌入一个 `weaver.Implements[T]` 字段，其中T是它实现的组件接口。
-
-`weaver.Implements[T]` implements the `weaver.Instance` interface and therefore
-every component implementation (including `foo`) also implements
-`weaver.Instance`.
-
-`weaver.Implements[T]` 实现 `weaver.Instance` 实例接口，因此每个组件实现(包括`foo`)也实现了`weaver.Instance`。
 
 If a component implementation implements an `Init(context.Context) error`
 method, it will be called when an instance of the component is created.
@@ -814,22 +833,22 @@ type impl struct{
 }
 ```
 
-Listener names are always lowercased and must be unique inside a given
-application binary, regardless of which components they are specified in. For
-example, it is illegal to declare a Listener field `"foo"` in two different
-component implementations structs, unless one is renamed using the
-````weaver:"name"```` struct tag.
+Listener names must be unique inside a given application binary, regardless of
+which components they are specified in. For example, it is illegal to declare a
+Listener field `"foo"` in two different component implementations structs,
+unless one is renamed using the ````weaver:"name"```` struct tag.
 
 By default, all application listeners will listen on a random port chosen
 by the operating system. This behavior, as well as other customization options,
-can be controlled in the [configuration file](#config-file). For example, the
-following config will assign addresses `"localhost:12345"` and
-`"localhost:12346"` to `"foo"` and `"bar"`, respectively.
+can be modified in the respective deployers' configuration file. For example,
+the following config file will assign addresses `"localhost:12345"` and
+`"localhost:12346"` to `"foo"` and `"bar"`, respectively, when the application
+is deployed using the [multiprocess](#multiprocess) deployer.
 
 ```toml
-[listeners]
-foo = {local_address = "localhost:12345"}
-bar = {local_address = "localhost:12346"}
+[multi]
+listeners.foo = {address = "localhost:12345"}
+listeners.bar = {address = "localhost:12346"}
 ```
 
 ## Config
@@ -845,25 +864,15 @@ Service Weaver使用用 [config files](#config-files) 编写 [TOML](#toml) 配�
 binary = "./hello"
 ```
 
-A config file may additionally contain listener-specific configuration sections,
-which allow you to configure the [network listeners](#components-listeners) in
-your application. For example, consider the listener `"foo"` declared in
-a component implementation.
-
-```go
-type impl struct{
-    weaver.Implements[MyComponent]
-    foo weaver.Listener
-}
-```
-
-By default, listener `"foo"` will listen on a random port chosen by the
-operating system. To configure it to listen on a specific local port, we can
-add the following section to the config file:
+A config file may additionally contain deployer-specific configuration sections,
+which allow you to configure the execution when a given deployer is used.
+For example, the following multiprocess config will enable `mTLS`
+communication between components when the application is deployed using the
+[multiprocess](#multiprocess) deployer:
 
 ```toml
-[listeners]
-foo = {local_address = "localhost:12345}
+[multi]
+mtls = true
 ```
 
 A config file may also contain component-specific configuration
@@ -936,9 +945,22 @@ func (g *greeter) Greet(_ context.Context, name string) (string, error) {
 }
 ```
 
-<div hidden class="todo">
-    Move the next part to the Single Process section and forward link.
-</div>
+You can use `toml` struct tags to specify the name that should be used for a
+field in a config file. For example, we can change the `greeterOptions` struct
+to the following.
+
+```go
+type greeterOptions struct {
+    Greeting string `toml:"my_custom_name"`
+}
+```
+
+And change the config file accordingly:
+
+```toml
+["example.com/mypkg/Greeter"]
+my_custom_name = "Bonjour"
+```
 
 If you run an application directly (i.e. using `go run`), you can pass the
 config file using the `SERVICEWEAVER_CONFIG` environment variable:
@@ -1161,24 +1183,21 @@ type labels struct {
 
 ## Auto-Generated Metrics
 
-Service Weaver automatically creates and maintains the following set of metrics, which
-measure the count, latency, and chattiness of every remote component method
+Service Weaver automatically creates and maintains the following set of metrics,
+which measure the count, latency, and chattiness of every component method
 invocation. Every metric is labeled by the calling component as well as the
-invoked component and method.
+invoked component and method, and whether or not the call was local or remote.
 
--   `serviceweaver_remote_method_count`: Count of Service Weaver component
+-   `serviceweaver_method_count`: Count of Service Weaver component
     method invocations.
--   `serviceweaver_remote_method_error_count`: Count of Service Weaver component
+-   `serviceweaver_method_error_count`: Count of Service Weaver component
     method invocations that result in an error.
--   `serviceweaver_remote_method_latency_micros`: Duration, in microseconds, of
+-   `serviceweaver_method_latency_micros`: Duration, in microseconds, of
     Service Weaver component method execution.
--   `serviceweaver_remote_method_bytes_request`: Number of bytes in Service
-    Weaver component method requests.
--   `serviceweaver_remote_method_bytes_reply`: Number of bytes in Service Weaver
-    component method replies.
-
-**Note**: These metrics only measure *remote* method calls. Local method calls,
-like those between two co-located components, are not measured.
+-   `serviceweaver_method_bytes_request`: Number of bytes in Service
+    Weaver remote component method requests.
+-   `serviceweaver_method_bytes_reply`: Number of bytes in Service Weaver
+    remote component method replies.
 
 ## HTTP Metrics
 
@@ -1211,9 +1230,22 @@ mux.Handle("/foo", weaver.InstrumentHandler("foo", fooHandler))
 Service Weaver relies on [OpenTelemetry][otel] to trace your application.
 Service Weaver exports these traces into the environment where your application
 is deployed. If you [deploy a Service Weaver application to Google Cloud](#gke),
-for example, traces are automatically exported to [Google Cloud
-Trace][cloud_trace]. Here's an example of how to enable tracing for a simple
-`Hello, World!` application.
+for example, traces are automatically exported to
+[Google Cloud Trace][cloud_trace].
+
+If you pass an [`http.Handler`](https://pkg.go.dev/net/http#Handler) to the
+`weaver.InstrumentHandler` function, it will return a new `http.Handler` that
+traces an HTTP request every second.
+
+```go
+// Tracing is enabled for one request every second.
+var mux http.ServeMux
+var fooHandler http.Handler = ...
+mux.Handle("/foo", weaver.InstrumentHandler("foo", fooHandler))
+```
+
+Alternatively, you can enable tracing manually using the [OpenTelemetry][otel]
+libraries:
 
 ```go
 import (
@@ -1227,7 +1259,7 @@ import (
 )
 
 func main() {
-    if err := weaver.Run(context.Background()); err != nil {
+    if err := weaver.Run(context.Background(), serve); err != nil {
         log.Fatal(err)
     }
 }
@@ -1237,7 +1269,7 @@ type app struct {
     lis weaver.Listener
 }
 
-func (app *app) Main(ctx context.Context) error {
+func serve(ctx context.Context, app *app) error {
     fmt.Printf("hello listener available on %v\n", app.lis)
 
     // Serve the /hello endpoint.
@@ -1245,29 +1277,21 @@ func (app *app) Main(ctx context.Context) error {
         fmt.Fprintf(w, "Hello, %s!\n", r.URL.Query().Get("name"))
     })
 
-    // Create an otel handler to enable tracing.
+    // Create an otel handler to manually enable tracing.
     otelHandler := otelhttp.NewHandler(http.DefaultServeMux, "http")
     return http.Serve(lis, otelHandler)
 }
 ```
 
-This code does the following:
-
-- `http.HandleFunc("/hello", ...)` registers a handler with the default HTTP
-  mux, called `http.DefaultServeMux`.
-- `otelhttp.NewHandler(http.DefaultServeMux, "http")` returns a new HTTP handler
-  that wraps the default HTTP mux.
-- `http.Serve(lis, otelHandler)` serves HTTP traffic on `lis` using the
-  OpenTelemetry handler.
-
-Using the OpenTelemetry HTTP handler enables tracing. Once tracing is enabled,
-all HTTP requests and resulting component method calls will be automatically
-traced. Service Weaver will collect and export the traces for you. Refer to the
+Regardless of whether you use `weaver.InstrumentHandler` or you manually enable
+tracing, once tracing is enabled for a given HTTP request, that request
+and the resulting component method calls will be automatically traced. Service
+Weaver will collect and export the traces for you. Refer to the
 deployer-specific documentation for [single process](#single-process-tracing),
 [multiprocess](#multiprocess-tracing), and [GKE](#gke-tracing) to learn about
-deployer specific exporters.
+deployer-specific exporters.
 
-The step above is all you need to get started with tracing. If you want to add
+The steps above are all you need to get started with tracing. If you want to add
 more application-specific details to your traces, you can add attributes,
 events, and errors using the context passed to registered HTTP handlers and
 component methods. For example, in our `hello` example, you can add an event as
@@ -1289,13 +1313,13 @@ more about how to add more application-specific details to your traces.
 
 # Profiling
 
-Service Weaver allows you to profile an entire Service Weaver application, even one that is
-deployed in multiple processes across multiple machines. Service Weaver profiles every
-individual binary and aggregates them into a single profile that captures the
-performance of the application as a whole. Refer to the deployer-specific
-documentation for details on how to collect profiles for [single
-process](#single-process-profiling), [multiprocess](#multiprocess-profiling),
-and [GKE](#gke-profiling) deployments.
+Service Weaver allows you to profile an entire Service Weaver application, even
+one that is deployed in multiple processes across multiple machines. Service
+Weaver profiles every individual binary and aggregates them into a single
+profile that captures the performance of the application as a whole. Refer to
+the deployer-specific documentation for details on how to collect profiles for
+[single process](#single-process-profiling),
+[multiprocess](#multiprocess-profiling), and [GKE](#gke-profiling) deployments.
 
 # Routing
 
@@ -1348,8 +1372,9 @@ A routing key can be
 
 -   any integer (e.g., `int`, `int32`), float (i.e. `float32`, `float64`), or
     string; or
--   a struct where every field is an integer, float, or string (e.g., `struct{x
-    int; y string}`).
+-   a struct that may optionally embed `weaver.AutoMarshal`, and all remaining
+    fields must be either integers, floats, or strings. (e.g.
+    `struct{weaver.AutoMarshal; x int; y string}`, `struct{x int; y string}`, etc )
 
 Every router method must return the same routing key type. The following, for
 example, is invalid:
@@ -1495,18 +1520,31 @@ func TestAdd(t *testing.T) {
 ```
 
 Run `go test` to run the test. `runner.Test` will create a sub-test and within
-it will create an `Adder` component and pass it to the supplied function. Tests
-that want to exercise multiple components can pass a function with a separate
-argument per component. Each of those components will be created and passed to
-the function.
+it will create an `Adder` component and pass it to the supplied function. If you
+want to test the implementation of a component, rather than its interface,
+specify a pointer to the implementing struct as an argument. For example, if the
+`adderImpl` struct implemented the `Adder` interface, we could write the following:
+
+```go
+runner.Test(t, func(t *testing.T, adder *adderImpl) {
+    // Test adder...
+})
+```
+
+Tests that want to exercise multiple components can pass a function with a
+separate argument per component. Each of those components will be created and
+passed to the function. Each argument can be a component interface or a pointer
+to a component implementation.
 
 ```go
 func TestArithmetic(t *testing.T) {
-    weavertest.Local.Test(t, func(t *testing.T, adder Adder, multiplier Multiplier) {
+    weavertest.Local.Test(t, func(t *testing.T, adder *adderImpl, multiplier Multiplier) {
         // ...
     })
 }
 ```
+
+## Runners
 
 `weavertest` provides a set of builtin Runners that differ in how they partition
 components across processes and how the components communicate with each other:
@@ -1534,6 +1572,57 @@ func TestAdd(t *testing.T) {
     }
 }
 ```
+
+## Fakes
+
+You can replace a component implementation with a fake implementation in a test
+using [`weavertest.Fake`][weavertest.Fake]. Here's an example where we replace
+the real implementation of a `Clock` component with a fake implementation that
+always returns a fixed time.
+
+```go
+// fakeClock is a fake implementation of the Clock component.
+type fakeClock struct {
+    now int64
+}
+
+// Now implements the Clock component interface. It returns the current time, in
+// microseconds, since the unix epoch.
+func (f *fakeClock) Now(context.Context) (int64, error) {
+    return f.now, nil
+}
+
+func TestClock(t *testing.T) {
+    for _, runner := range weavertest.AllRunners() {
+        // Register a fake Clock implementation with the runner.
+        fake := &fakeClock{100}
+        runner.Fakes = append(runner.Fakes, weavertest.Fake[Clock](fake))
+
+        // When a fake is registered for a component, all instances of that
+        // component dispatch to the fake.
+        runner.Test(t, func(t *testing.T, clock Clock) {
+            now, err := clock.UnixMicro(context.Background())
+            if err != nil {
+                t.Fatal(err)
+            }
+            if now != 100 {
+                t.Fatalf("bad time: got %d, want %d", now, 100)
+            }
+
+            fake.now = 200
+            now, err = clock.UnixMicro(context.Background())
+            if err != nil {
+                t.Fatal(err)
+            }
+            if now != 200 {
+                t.Fatalf("bad time: got %d, want %d", now, 200)
+            }
+        })
+    }
+}
+```
+
+## Config
 
 You can also provide the contents of a [config file](#config-files) to a runner
 by setting the `Runner.Config` field:
@@ -1670,8 +1759,14 @@ type app struct {
 
 When you deploy an application using `go run`, the network listeners will be
 automatically created by the Service Weaver runtime. Each listener will listen
-on a random port chosen by the operating system, unless concrete local addresses
-have been specified in the [config file](#components-config).
+on a random port chosen by the operating system, unless a concrete address
+has been specified in the singleprocess section of the
+[config file](#components-config), e.g.:
+
+```toml
+[single]
+listeners.hello = { address = "localhost:12345" }
+```
 
 ## Logging
 
@@ -1868,8 +1963,15 @@ the runtime:
    listener. In fact, the proxy balances traffic across every replica of the
    listener. (Recall that components may be replicated, and so every component
    replica will have a different instance of the listener.)
-   The proxy address is by default `localhost:0`, or the local address assigned
-   to the listener in the config file, if any.
+
+The proxy address is by default `:0`, unless a concrete address has been
+specified in the multiprocess section of the [config file](#components-config),
+e.g.:
+
+```toml
+[multi]
+listeners.hello = { address = "localhost:12345" }
+```
 
 ## Logging
 
@@ -2094,9 +2196,7 @@ binary = "./hello"
 
 [gke]
 regions = ["us-west1"]
-public_listener = [
-  {name = "hello", hostname = "hello.com"},
-]
+listeners.hello = {public_hostname = "hello.com"}
 ```
 
 The `[serviceweaver]` section of the config file specifies the compiled Service
@@ -2487,10 +2587,8 @@ You can configure `weaver gke` using the `[gke]` section of a
 project = "my-google-cloud-project"
 account = "my_account@gmail.com"
 regions = ["us-west1", "us-east1"]
-public_listener = [
-    {name = "cat", hostname = "cat.com"},
-    {name = "hat", hostname = "hat.gg"},
-]
+listeners.cat = {public_hostname = "cat.com"}
+listeners.hat = {public_hostname = "hat.gg"}
 ```
 
 | Field | Required? | Description |
@@ -2498,7 +2596,7 @@ public_listener = [
 | project | optional | Name of the Google Cloud Project in which to deploy the Service Weaver application. If absent, the currently active project is used (i.e. `gcloud config get-value project`) |
 | account | required | Google Cloud account used to deploy the Service Weaver application. If absent, the currently active account is used (i.e. `gcloud config get-value account`). |
 | regions | optional | Regions in which the Service Weaver application should be deployed. Defaults to `["us-west1"]`. |
-| public_listener | optional | The application's public listeners along with their corresponding hostnames. |
+| listeners | optional | The application's listener options, e.g., the listeners' public hostnames. |
 
 # Local GKE
 
@@ -2535,9 +2633,7 @@ binary = "./hello"
 
 [gke]
 regions = ["us-west1"]
-public_listener = [
-  {name = "hello", hostname = "hello.com"},
-]
+listeners.hello = {public_hostname = "hello.com"}
 
 $ weaver gke-local deploy weaver.toml
 Deploying the application... Done
@@ -2816,10 +2912,17 @@ type Pair[A any] struct {
 To serialize generic structs, implement `BinaryMarshaler` and
 `BinaryUnmarshaler`.
 
-Finally note that while [Service Weaver requires every component method to
-return an `error`](#components-interfaces), `error` is not a
-serializable type. Service Weaver serializes `error`s in a way that does not
-preserve any custom `Is` or `As` methods.
+## Errors
+
+Service Weaver requires every component method to [return an
+error](#components-interfaces).  If a non-nil error is returned, Service Weaver
+by default transmits the textual representation of the error. Therefore any
+custom information stored in the error value, or custom `Is` or `As` methods,
+are not available to the caller.
+
+Applications that need custom error information can embed a `weaver.AutoMarshal`
+in their custom error type. Service Weaver will then serialize and deserialize
+such errors properly and make them available to the caller.
 
 # weaver generate
 
@@ -3016,6 +3119,7 @@ runtime benefits of microservices.
 [cloud_metrics]: https://cloud.google.com/monitoring/api/metrics_gcp
 [cloud_trace]: https://cloud.google.com/trace
 [db_engines]: https://db-engines.com/en/ranking
+[emojis]: https://emojis.serviceweaver.dev/
 [gcloud_billing]: https://console.cloud.google.com/billing
 [gcloud_billing_projects]: https://console.cloud.google.com/billing/projects
 [gcloud_install]: https://cloud.google.com/sdk/docs/install
@@ -3049,4 +3153,6 @@ runtime benefits of microservices.
 [weak_consistency]: https://mwhittaker.github.io/consistency_in_distributed_systems/1_baseball.html
 [weaver_examples]: https://github.com/ServiceWeaver/weaver/tree/main/examples
 [weaver_github]: https://github.com/ServiceWeaver/weaver
+[weavertest.Fake]: https://pkg.go.dev/github.com/ServiceWeaver/weaver/weavertest#Fake
+[workshop]: https://github.com/serviceweaver/workshops
 [xdg]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html

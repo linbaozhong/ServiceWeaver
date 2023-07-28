@@ -2,12 +2,12 @@
 binary = "./onlineboutique"
 rollout = "5m"
 
-[listeners]
-boutique = {local_address = ":12345"}
+[single]
+listeners.boutique = {address = "localhost:12345"}
+
+[multi]
+listeners.boutique = {address = "localhost:12345"}
 
 [gke]
 regions = ["us-west1"]
-public_listener = [
-  {name = "boutique", hostname = "onlineboutique.example.com"},
-]
-
+listeners.boutique = {public_hostname = "onlineboutique.example.com"}

@@ -30,7 +30,6 @@ import (
 	"github.com/ServiceWeaver/weaver/runtime/codegen"
 	"github.com/ServiceWeaver/weaver/runtime/protos"
 	"github.com/google/uuid"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -119,11 +118,11 @@ func makeConnections(t *testing.T, handler conn.EnvelopeHandler) (*conn.Envelope
 	weaveletDone := make(chan error)
 	go func() {
 		var err error
-		if w, err = conn.NewWeaveletConn(wReader, wWriter, nil /*handler*/); err != nil {
+		if w, err = conn.NewWeaveletConn(wReader, wWriter); err != nil {
 			panic(err)
 		}
 		created <- struct{}{}
-		err = w.Serve()
+		err = w.Serve(nil)
 		weaveletDone <- err
 
 	}()
@@ -160,7 +159,7 @@ type handlerForTest struct{}
 
 var _ conn.EnvelopeHandler = &handlerForTest{}
 
-func (*handlerForTest) HandleTraceSpans(context.Context, []sdktrace.ReadOnlySpan) error {
+func (*handlerForTest) HandleTraceSpans(context.Context, *protos.TraceSpans) error {
 	return nil
 }
 
@@ -198,7 +197,7 @@ func register[Intf, Impl any](name string) {
 		Name:         name,
 		Iface:        reflection.Type[Intf](),
 		Impl:         reflect.TypeOf(zero),
-		LocalStubFn:  func(any, trace.Tracer) any { return nil },
+		LocalStubFn:  func(any, string, trace.Tracer) any { return nil },
 		ClientStubFn: func(codegen.Stub, string) any { return nil },
 		ServerStubFn: func(any, func(uint64, float64)) codegen.Server { return nil },
 	})

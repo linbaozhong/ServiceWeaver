@@ -22,7 +22,6 @@ import (
 	"net/http"
 
 	"github.com/ServiceWeaver/weaver"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 //go:generate ../../cmd/weaver/weaver generate
@@ -37,7 +36,7 @@ var (
 func main() {
 	// Initialize the Service Weaver application.
 	flag.Parse()
-	if err := weaver.Run(context.Background()); err != nil {
+	if err := weaver.Run(context.Background(), serve); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -48,7 +47,7 @@ type server struct {
 	lis      weaver.Listener `weaver:"reverser"`
 }
 
-func (s *server) Main(ctx context.Context) error {
+func serve(ctx context.Context, s *server) error {
 	// Setup the HTTP handler.
 	var mux http.ServeMux
 	mux.Handle("/", weaver.InstrumentHandlerFunc("reverser",
@@ -65,8 +64,7 @@ func (s *server) Main(ctx context.Context) error {
 			fmt.Fprintln(w, reversed)
 		}))
 	mux.HandleFunc(weaver.HealthzURL, weaver.HealthzHandler)
-	handler := otelhttp.NewHandler(&mux, "http")
 
 	fmt.Printf("hello listener available on %v\n", s.lis)
-	return http.Serve(s.lis, handler)
+	return http.Serve(s.lis, &mux)
 }

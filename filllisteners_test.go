@@ -17,7 +17,6 @@ package weaver
 import (
 	"fmt"
 	"net"
-	"strings"
 	"testing"
 )
 
@@ -26,7 +25,7 @@ type testListener struct {
 }
 
 func getListener(lis string) (net.Listener, string, error) {
-	if lis != "a" && lis != "b" && lis != "cname" && lis != "dname" {
+	if lis != "A" && lis != "b" && lis != "cname" && lis != "DName" {
 		return nil, "", fmt.Errorf("unexpected listener %q", lis)
 	}
 	return &testListener{}, lis, nil
@@ -42,36 +41,16 @@ func TestFillListeners(t *testing.T) {
 	if err := fillListeners(&x, getListener); err != nil {
 		t.Fatal(err)
 	}
-	if x.A.proxyAddr != "a" {
-		t.Errorf(`expecting x.A.proxyAddr to be "a", got %q`, x.A.proxyAddr)
+	if x.A.ProxyAddr() != "A" {
+		t.Errorf(`expecting x.A.ProxyAddr() to be "A", got %q`, x.A.ProxyAddr())
 	}
-	if x.b.proxyAddr != "b" {
-		t.Errorf(`expecting x.b.proxyAddr to be "b", got %q`, x.b.proxyAddr)
+	if x.b.ProxyAddr() != "b" {
+		t.Errorf(`expecting x.b.ProxyAddr() to be "b", got %q`, x.b.ProxyAddr())
 	}
-	if x.C.proxyAddr != "cname" {
-		t.Errorf(`expecting x.C.proxyAddr to be "cname", got %q`, x.C.proxyAddr)
+	if x.C.ProxyAddr() != "cname" {
+		t.Errorf(`expecting x.C.ProxyAddr() to be "cname", got %q`, x.C.ProxyAddr())
 	}
-	if x.d.proxyAddr != "dname" {
-		t.Errorf(`expecting x.d.proxyAddr to be "dname", got %q`, x.d.proxyAddr)
-	}
-}
-
-func TestFillListenerErrors(t *testing.T) {
-	type impl struct{}
-	type testCase struct {
-		name   string
-		impl   any    // impl argument to pass to fillRefs
-		expect string // Returned error must contain this string
-	}
-	for _, c := range []testCase{
-		{"not-pointer", impl{}, "not a pointer"},
-		{"not-struct-pointer", new(int), "not a struct pointer"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			err := fillRefs(c.impl, getValue)
-			if err == nil || !strings.Contains(err.Error(), c.expect) {
-				t.Fatalf("unexpected error %v; expecting %s", err, c.expect)
-			}
-		})
+	if x.d.ProxyAddr() != "DName" {
+		t.Errorf(`expecting x.d.ProxyAddr() to be "Dname", got %q`, x.d.ProxyAddr())
 	}
 }

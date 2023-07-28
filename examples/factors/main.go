@@ -18,8 +18,7 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
-	"os"
+	"log"
 
 	"github.com/ServiceWeaver/weaver"
 )
@@ -29,8 +28,7 @@ import (
 func main() {
 	flag.Parse()
 	ctx := context.Background()
-	if err := weaver.Run(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if err := weaver.Run(ctx, serve); err != nil {
+		log.Fatal(err)
 	}
 }
