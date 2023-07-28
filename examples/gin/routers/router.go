@@ -3,17 +3,19 @@ package routers
 import (
 	"context"
 	"github.com/ServiceWeaver/weaver"
+	"github.com/ServiceWeaver/weaver/examples/gin/components/reverse"
+	"github.com/ServiceWeaver/weaver/examples/gin/handlers"
 	"github.com/gin-gonic/gin"
-	"hello/components/reverse"
-	"hello/handlers"
 	"net/http"
 )
 
 type T interface {
 	InitRouter(ctx context.Context) error
 }
+
 type router struct {
 	weaver.Implements[T]
+	lis      weaver.Listener
 	reverser weaver.Ref[reverse.T]
 }
 
@@ -33,14 +35,7 @@ func (r *router) InitRouter(ctx context.Context) error {
 		}
 	}
 
-	opts := weaver.ListenerOptions{LocalAddress: "localhost:12345"}
-	lis, e := r.Listener("hello", opts)
-	if e != nil {
-		r.Logger().Error(e.Error())
-		return e
-	}
-
-	e = app.RunListener(lis)
+	e := app.RunListener(r.lis)
 	if e != nil {
 		r.Logger().Error(e.Error())
 	}
@@ -51,7 +46,7 @@ func (r *router) InitRouter(ctx context.Context) error {
 func debug(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
-		"name":    "WeaverServices(iris) Hello",
+		"name":    "WeaverServices(gin) Hello",
 		"version": "0.1.0",
 	})
 }

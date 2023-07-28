@@ -3,8 +3,8 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"github.com/ServiceWeaver/weaver/examples/iris/components/reverse"
 	"github.com/kataras/iris/v12"
-	"hello/components/reverse"
 	"net/http"
 )
 

@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"context"
+	"github.com/ServiceWeaver/weaver/examples/gin/components/reverse"
 	"github.com/gin-gonic/gin"
-	"hello/components/reverse"
 	"net/http"
 )
 

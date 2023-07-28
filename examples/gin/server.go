@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"github.com/ServiceWeaver/weaver"
-	"hello/routers"
+	"github.com/ServiceWeaver/weaver/examples/gin/routers"
 )
 
 type Server struct {

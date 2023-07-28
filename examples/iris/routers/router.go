@@ -2,10 +2,11 @@ package routers
 
 import (
 	"context"
+	"fmt"
 	"github.com/ServiceWeaver/weaver"
+	"github.com/ServiceWeaver/weaver/examples/iris/components/reverse"
+	"github.com/ServiceWeaver/weaver/examples/iris/handlers"
 	"github.com/kataras/iris/v12"
-	"hello/components/reverse"
-	"hello/handlers"
 )
 
 type T interface {
@@ -14,9 +15,11 @@ type T interface {
 type router struct {
 	weaver.Implements[T]
 	reverser weaver.Ref[reverse.T]
+	lis      weaver.Listener
 }
 
 func (r *router) InitRouter(ctx context.Context) error {
+	fmt.Printf("hello listener available on %v\n", r.lis)
 	app := iris.New().Configure(iris.WithRemoteAddrHeader(
 		"X-Real-Ip",
 		"X-Forwarded-For",
@@ -34,14 +37,7 @@ func (r *router) InitRouter(ctx context.Context) error {
 		}
 	}
 
-	opts := weaver.ListenerOptions{LocalAddress: "localhost:12345"}
-	lis, e := r.Listener("hello", opts)
-	if e != nil {
-		r.Logger().Error(e.Error())
-		return e
-	}
-
-	e = app.Run(iris.Listener(lis),
+	e := app.Run(iris.Listener(r.lis),
 		iris.WithLogLevel("debug"))
 	if e != nil {
 		r.Logger().Error(e.Error())

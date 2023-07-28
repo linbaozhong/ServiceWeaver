@@ -1,5 +1,8 @@
 [serviceweaver]
-binary = "./hello.exe"
+binary = "./gin.exe"
+
+[listeners]
+lis = {local_address = "localhost:9000"}
 
 [gke]
 regions = ["us-west1"]

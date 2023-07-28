@@ -20,6 +20,7 @@ import (
 	"net/http"
 
 	"github.com/ServiceWeaver/weaver"
+	"github.com/ServiceWeaver/weaver/examples/hello/components/reverse"
 )
 
 func main() {
@@ -28,11 +29,11 @@ func main() {
 	}
 }
 
-//go:generate ../../cmd/weaver/weaver generate
+//go:generate ../../cmd/weaver/weaver.exe generate ./...
 
 type app struct {
 	weaver.Implements[weaver.Main]
-	reverser weaver.Ref[Reverser]
+	reverser weaver.Ref[reverse.T]
 	hello    weaver.Listener
 }
 

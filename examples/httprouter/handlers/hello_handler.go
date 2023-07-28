@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/ServiceWeaver/weaver"
+	"github.com/ServiceWeaver/weaver/examples/httprouter/components/reverse"
 	"github.com/julienschmidt/httprouter"
-	"hello/components/reverse"
 	"net/http"
 )
 

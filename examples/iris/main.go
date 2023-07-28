@@ -23,9 +23,7 @@ import (
 
 func main() {
 	// 启动应用程序，例如 HTTP 服务等
-	e := weaver.Run[*Server](context.Background(), func(ctx context.Context, a *Server) error {
-		return a.Main(ctx)
-	})
+	e := weaver.Run(context.Background())
 	if e != nil {
 		log.Fatal(e)
 	}
