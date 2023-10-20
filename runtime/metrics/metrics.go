@@ -19,6 +19,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -26,7 +27,6 @@ import (
 	"github.com/ServiceWeaver/weaver/runtime/protos"
 	"github.com/google/uuid"
 	"golang.org/x/exp/maps"
-	"golang.org/x/exp/slices"
 )
 
 var (
@@ -111,7 +111,7 @@ func (m *MetricSnapshot) MetricValue() *protos.MetricValue {
 	}
 }
 
-// MetricSnapshot converts a MetricSnapshot to its proto equivalent.
+// ToProto converts a MetricSnapshot to its proto equivalent.
 func (m *MetricSnapshot) ToProto() *protos.MetricSnapshot {
 	return &protos.MetricSnapshot{
 		Id:     m.Id,

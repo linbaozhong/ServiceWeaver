@@ -32,6 +32,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/exp/maps"
 
+	itool "github.com/ServiceWeaver/weaver/internal/tool"
 	"github.com/ServiceWeaver/weaver/internal/tool/config"
 	"github.com/ServiceWeaver/weaver/internal/tool/ssh/impl"
 	"github.com/ServiceWeaver/weaver/runtime"
@@ -39,7 +40,6 @@ import (
 	"github.com/ServiceWeaver/weaver/runtime/codegen"
 	"github.com/ServiceWeaver/weaver/runtime/colors"
 	"github.com/ServiceWeaver/weaver/runtime/logging"
-	"github.com/ServiceWeaver/weaver/runtime/protos"
 	"github.com/ServiceWeaver/weaver/runtime/tool"
 	"github.com/ServiceWeaver/weaver/runtime/version"
 )
@@ -89,10 +89,8 @@ func deploy(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	config.Deployment = &protos.Deployment{
-		Id:  uuid.New().String(),
-		App: app,
-	}
+	config.App = app
+	config.DepId = uuid.New().String()
 
 	// Check version compatibility.
 	versions, err := bin.ReadVersions(app.Binary)
@@ -108,6 +106,10 @@ func deploy(ctx context.Context, args []string) error {
 				binary = rel
 			}
 		}
+		selfVersion, err := itool.SelfVersion()
+		if err != nil {
+			return fmt.Errorf("read self version: %w", err)
+		}
 		return fmt.Errorf(`
 ERROR: The binary you're trying to deploy (%q) was built with
 github.com/ServiceWeaver/weaver module version %s. However, the 'weaver
@@ -122,7 +124,7 @@ updating the 'weaver ssh' command by running the following.
 
 Then, re-build your code and re-run 'weaver ssh deploy'. If the problem
 persists, please file an issue at https://github.com/ServiceWeaver/weaver/issues.`,
-			binary, versions.ModuleVersion, version.ModuleVersion)
+			binary, versions.ModuleVersion, selfVersion)
 	}
 
 	// Retrieve the list of locations to deploy.
@@ -132,7 +134,7 @@ persists, please file an issue at https://github.com/ServiceWeaver/weaver/issues
 	}
 
 	// Copy the binaries to each location.
-	locations, err := copyBinaries(locs, config.Deployment)
+	locations, err := copyBinaries(locs, app.Binary, config.DepId)
 	if err != nil {
 		return err
 	}
@@ -148,7 +150,7 @@ persists, please file an issue at https://github.com/ServiceWeaver/weaver/issues
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-done // Will block here until user hits ctrl+c
-		if err := terminateDeployment(locs, config.Deployment); err != nil {
+		if err := terminateDeployment(locs, config.DepId); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to terminate deployment: %v\n", err)
 		}
 		fmt.Fprintf(os.Stderr, "Application %s terminated\n", app.Name)
@@ -160,7 +162,7 @@ persists, please file an issue at https://github.com/ServiceWeaver/weaver/issues
 
 	// Follow the logs.
 	source := logging.FileSource(impl.LogDir)
-	query := fmt.Sprintf(`full_version == %q && !("serviceweaver/system" in attrs)`, config.Deployment.Id)
+	query := fmt.Sprintf(`full_version == %q && !("serviceweaver/system" in attrs)`, config.DepId)
 	r, err := source.Query(ctx, query, true)
 	if err != nil {
 		return err
@@ -181,18 +183,16 @@ persists, please file an issue at https://github.com/ServiceWeaver/weaver/issues
 // to the given set of locations. It produces a map which
 // returns the paths to the directories where the binaries
 // were copied, keyed by locations.
-func copyBinaries(locs []string, dep *protos.Deployment) (map[string]string, error) {
+func copyBinaries(locs []string, appBinary string, depId string) (map[string]string, error) {
 	ex, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
 
-	tmpDirs, err := getTmpDirs(locs, dep.Id)
+	tmpDirs, err := getTmpDirs(locs, depId)
 	if err != nil {
 		return nil, err
 	}
-
-	binary := dep.App.Binary
 
 	for loc, tmpDir := range tmpDirs {
 		cmd := exec.Command("ssh", loc, "mkdir", "-p", tmpDir)
@@ -200,7 +200,7 @@ func copyBinaries(locs []string, dep *protos.Deployment) (map[string]string, err
 			return nil, fmt.Errorf("unable to create deployment directory at location %s: %w\n", loc, err)
 		}
 
-		cmd = exec.Command("scp", ex, binary, loc+":"+tmpDir)
+		cmd = exec.Command("scp", ex, appBinary, loc+":"+tmpDir)
 		if err := cmd.Run(); err != nil {
 			return nil, fmt.Errorf("unable to copy app binary at location %s: %w\n", loc, err)
 		}
@@ -214,9 +214,9 @@ func copyBinaries(locs []string, dep *protos.Deployment) (map[string]string, err
 //
 // TODO(rgrandl): Find a different way to kill the deployment if the pkill command
 // is not installed.
-func terminateDeployment(locs []string, dep *protos.Deployment) error {
+func terminateDeployment(locs []string, depId string) error {
 	for _, loc := range locs {
-		cmd := exec.Command("ssh", loc, "pkill", "-f", dep.Id)
+		cmd := exec.Command("ssh", loc, "pkill", "-f", depId)
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("unable to terminate deployment at location %s: %w", loc, err)
 		}

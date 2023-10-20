@@ -17,6 +17,7 @@ package weaver
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -28,6 +29,7 @@ import (
 	"time"
 
 	"github.com/ServiceWeaver/weaver/internal/config"
+	"github.com/ServiceWeaver/weaver/internal/env"
 	"github.com/ServiceWeaver/weaver/internal/envelope/conn"
 	imetrics "github.com/ServiceWeaver/weaver/internal/metrics"
 	"github.com/ServiceWeaver/weaver/internal/status"
@@ -43,7 +45,6 @@ import (
 	"github.com/ServiceWeaver/weaver/runtime/traces"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/exp/slog"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -89,6 +90,15 @@ func NewSingleWeavelet(ctx context.Context, regs []*codegen.Registration, opts S
 	config, err := parseSingleConfig(regs, opts.ConfigFilename, opts.Config)
 	if err != nil {
 		return nil, err
+	}
+	env, err := env.Parse(config.App.Env)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range env {
+		if err := os.Setenv(k, v); err != nil {
+			return nil, err
+		}
 	}
 
 	// Set up tracer.
@@ -409,16 +419,13 @@ func (w *SingleWeavelet) Status(context.Context) (*status.Status, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// TODO(mwhittaker): The main process should probably be registered like
-	// any other process?
 	pid := int64(os.Getpid())
 	stats := w.stats.GetStatsStatusz()
-	components := []*status.Component{{Name: "main", Pids: []int64{pid}}}
+	var components []*status.Component
 	for component := range w.components {
 		c := &status.Component{
-			Name:  component,
-			Group: "main",
-			Pids:  []int64{pid},
+			Name: component,
+			Pids: []int64{pid},
 		}
 		components = append(components, c)
 

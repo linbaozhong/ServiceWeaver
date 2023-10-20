@@ -20,6 +20,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -27,13 +28,13 @@ import (
 	"github.com/ServiceWeaver/weaver/internal/weaver"
 	"github.com/ServiceWeaver/weaver/runtime/codegen"
 	"github.com/ServiceWeaver/weaver/runtime/logging"
-	"golang.org/x/exp/slices"
 )
 
 // Runner runs user-supplied testing code as a weaver application.
 type Runner struct {
-	multi    bool // Use multiple processes
-	forceRPC bool // Use RPCs even for local calls
+	multi         bool // Use multiple processes
+	forceRPC      bool // Use RPCs even for local calls
+	injectRetries int  // Number of fake retries to add to remote retriable calls
 
 	// Name is used as the name of the sub-test created by
 	// Runner.Test (or the sub-benchmark created by
@@ -60,8 +61,10 @@ var (
 	Local = Runner{Name: "Local"}
 
 	// RPC is a Runner that places all components in the same process
-	// and uses RPCs for method invocations.
-	RPC = Runner{multi: false, forceRPC: true, Name: "RPC"}
+	// and uses RPCs for method invocations. We also add an extra retry to
+	// every retriable RPC to discover methods that should have been
+	// marked non-retriable.
+	RPC = Runner{multi: false, forceRPC: true, injectRetries: 1, Name: "RPC"}
 
 	// Multi is a Runner that places all components in different
 	// process (unless explicitly colocated) and uses RPCs for method
@@ -178,6 +181,10 @@ func (r Runner) sub(t testing.TB, isBench bool, testBody any) {
 			if err := cleanup(); err != nil {
 				// Since we are cleaning up, the test passed and we are
 				// just seeing expected shutdown errors.
+				//
+				// TODO(mwhittaker): Some of the errors returned by cleanup()
+				// were produced before the context was cancelled. We should
+				// fail the test in this case.
 				t.Log("cleanup", err)
 			}
 		}
@@ -211,13 +218,21 @@ func (r Runner) sub(t testing.TB, isBench bool, testBody any) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cleanup = multiCleanup
 
-		opts := weaver.RemoteWeaveletOptions{Fakes: fakes}
-		runner, err = weaver.NewRemoteWeavelet(ctx, codegen.Registered(), bootstrap, opts)
+		opts := weaver.RemoteWeaveletOptions{Fakes: fakes, InjectRetries: r.injectRetries}
+		wlet, err := weaver.NewRemoteWeavelet(ctx, codegen.Registered(), bootstrap, opts)
 		if err != nil {
 			t.Fatal(err)
 		}
+		cleanup = func() error {
+			if err := multiCleanup(); err != nil {
+				return err
+			}
+			// TODO(mwhittaker): Run Wait before cleanup to detect errors that
+			// happen before we cancel the context.
+			return wlet.Wait()
+		}
+		runner = wlet
 	}
 
 	if err := body(ctx, runner); err != nil {

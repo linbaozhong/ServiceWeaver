@@ -86,7 +86,7 @@ func TestMain(m *testing.M) {
 				return nil
 			},
 			"writetraces": func() error { return writeTraces(conn) },
-			"serve_conn":  func() error { return conn.Serve(nil) },
+			"serve_conn":  func() error { return conn.Serve(context.Background(), nil) },
 		}
 		fn, ok := cmds[cmd]
 		if !ok {
@@ -99,7 +99,7 @@ func TestMain(m *testing.M) {
 			fmt.Fprintf(os.Stderr, "subprocess: %v\n", err)
 			os.Exit(1)
 		}
-		conn.Serve(nil)
+		conn.Serve(context.Background(), nil)
 	}
 
 	var err error
@@ -120,11 +120,10 @@ func checkFile() error {
 // wlet returns a EnvelopeInfo and AppConfig for testing.
 func wlet(binary string, args ...string) (*protos.EnvelopeInfo, *protos.AppConfig) {
 	weavelet := &protos.EnvelopeInfo{
-		App:           "app",
-		DeploymentId:  uuid.New().String(),
-		Id:            uuid.New().String(),
-		SingleProcess: true,
-		SingleMachine: true,
+		App:             "app",
+		DeploymentId:    uuid.New().String(),
+		Id:              uuid.New().String(),
+		InternalAddress: "localhost:0",
 	}
 	config := &protos.AppConfig{Binary: binary, Args: args}
 	return weavelet, config
@@ -189,6 +188,23 @@ func (*handlerForTest) VerifyClientCertificate(context.Context, *protos.VerifyCl
 
 func (*handlerForTest) VerifyServerCertificate(context.Context, *protos.VerifyServerCertificateRequest) (*protos.VerifyServerCertificateReply, error) {
 	panic("unused")
+}
+
+// TestWeaveletExit tests that an envelope captures the stdout and stderr of a
+// subprocess that fails to perform the envelope-weavelet handshake.
+func TestWeaveletExit(t *testing.T) {
+	ctx := context.Background()
+	wlet, config := wlet("/usr/bin/env", "bash", "-c", `echo "hello from stdout"; echo "hello from stderr" >&2 && exit 1`)
+	_, err := NewEnvelope(ctx, wlet, config)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "hello from stdout") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "hello from stderr") {
+		t.Errorf("unexpected error: %v", err)
+	}
 }
 
 func TestStartStop(t *testing.T) {

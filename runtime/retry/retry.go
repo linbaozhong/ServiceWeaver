@@ -70,7 +70,7 @@ func Begin() *Retry {
 //	  BackoffMultiplier: 2.0,
 //	  BackoffMinDuration: time.Second,
 //	}
-//	for r := retry.Begin(); r.Continue(ctx); {
+//	for r := retry.BeginWithOptions(opts); r.Continue(ctx); {
 //	  // Do nothing.
 //	}
 func BeginWithOptions(options Options) *Retry {
@@ -122,9 +122,10 @@ func randomized(ctx context.Context, d time.Duration) {
 // whichever occurs first.
 func sleep(ctx context.Context, d time.Duration) {
 	t := time.NewTimer(d)
+	defer t.Stop()
 	select {
 	case <-ctx.Done():
-		t.Stop()
+		return
 	case <-t.C:
 	}
 }

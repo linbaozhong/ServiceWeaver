@@ -17,6 +17,7 @@ package impl
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"sync"
@@ -30,7 +31,6 @@ import (
 	"github.com/ServiceWeaver/weaver/runtime/protos"
 	"github.com/ServiceWeaver/weaver/runtime/retry"
 	"github.com/google/uuid"
-	"golang.org/x/exp/slog"
 )
 
 // babysitter starts and manages weavelets belonging to a single colocation
@@ -70,8 +70,8 @@ func RunBabysitter(ctx context.Context) error {
 		info: info,
 		logger: slog.New(&logging.LogHandler{
 			Opts: logging.Options{
-				App:        info.Deployment.App.Name,
-				Deployment: info.Deployment.Id,
+				App:        info.App.Name,
+				Deployment: info.DepId,
 				Component:  "Babysitter",
 				Weavelet:   uuid.NewString(),
 				Attrs:      []string{"serviceweaver/system", "", "weavelet", id},
@@ -91,14 +91,13 @@ func RunBabysitter(ctx context.Context) error {
 
 	// Start the envelope.
 	wlet := &protos.EnvelopeInfo{
-		App:           info.Deployment.App.Name,
-		DeploymentId:  info.Deployment.Id,
-		Id:            id,
-		Sections:      info.Deployment.App.Sections,
-		SingleProcess: info.Deployment.SingleProcess,
-		RunMain:       info.RunMain,
+		App:          info.App.Name,
+		DeploymentId: info.DepId,
+		Id:           id,
+		Sections:     info.App.Sections,
+		RunMain:      info.RunMain,
 	}
-	e, err := envelope.NewEnvelope(ctx, wlet, info.Deployment.App)
+	e, err := envelope.NewEnvelope(ctx, wlet, info.App)
 	if err != nil {
 		return err
 	}
@@ -108,7 +107,7 @@ func RunBabysitter(ctx context.Context) error {
 	// compiled binary.
 	winfo := e.WeaveletInfo()
 
-	if err := b.registerReplica(winfo); err != nil {
+	if err := b.registerReplica(winfo, e.Pid()); err != nil {
 		return err
 	}
 	c := metricsCollector{logger: b.logger, envelope: e, info: info}
@@ -180,7 +179,7 @@ func (b *babysitter) ActivateComponent(_ context.Context, req *protos.ActivateCo
 
 // registerReplica registers the information about a colocation group replica
 // (i.e., a weavelet).
-func (b *babysitter) registerReplica(info *protos.WeaveletInfo) error {
+func (b *babysitter) registerReplica(info *protos.WeaveletInfo, pid int) error {
 	if err := protomsg.Call(b.ctx, protomsg.CallArgs{
 		Client:  http.DefaultClient,
 		Addr:    b.info.ManagerAddr,
@@ -188,7 +187,7 @@ func (b *babysitter) registerReplica(info *protos.WeaveletInfo) error {
 		Request: &ReplicaToRegister{
 			Group:   b.info.Group,
 			Address: info.DialAddr,
-			Pid:     info.Pid,
+			Pid:     int64(pid),
 		},
 	}); err != nil {
 		return err

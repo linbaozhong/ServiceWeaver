@@ -17,13 +17,13 @@ package status
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 
 	"github.com/ServiceWeaver/weaver/runtime/metrics"
 	imetrics "github.com/ServiceWeaver/weaver/runtime/prometheus"
 	"github.com/ServiceWeaver/weaver/runtime/protomsg"
 	protos "github.com/ServiceWeaver/weaver/runtime/protos"
-	"golang.org/x/exp/slog"
 )
 
 const (
@@ -63,6 +63,6 @@ func RegisterServer(mux *http.ServeMux, server Server, logger *slog.Logger) {
 		}
 		var b bytes.Buffer
 		imetrics.TranslateMetricsToPrometheusTextFormat(&b, snapshots, r.Host, prometheusEndpoint)
-		w.Write(b.Bytes()) //nolint:errcheck // response write error
+		w.Write(b.Bytes())
 	})
 }

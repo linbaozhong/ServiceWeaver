@@ -14,26 +14,6 @@ import (
 	"reflect"
 )
 
-var _ codegen.LatestVersion = codegen.Version[[0][17]struct{}](`
-
-ERROR: You generated this file with 'weaver generate' v0.17.0 (codegen
-version v0.17.0). The generated code is incompatible with the version of the
-github.com/ServiceWeaver/weaver module that you're using. The weaver module
-version can be found in your go.mod file or by running the following command.
-
-    go list -m github.com/ServiceWeaver/weaver
-
-We recommend updating the weaver module and the 'weaver generate' command by
-running the following.
-
-    go get github.com/ServiceWeaver/weaver@latest
-    go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
-
-Then, re-run 'weaver generate' and re-build your code. If the problem persists,
-please file an issue at https://github.com/ServiceWeaver/weaver/issues.
-
-`)
-
 func init() {
 	codegen.Register(codegen.Registration{
 		Name:      "github.com/ServiceWeaver/weaver/internal/tool/generate/example/A",
@@ -49,6 +29,9 @@ func init() {
 		},
 		ServerStubFn: func(impl any, addLoad func(uint64, float64)) codegen.Server {
 			return a_server_stub{impl: impl.(A), addLoad: addLoad}
+		},
+		ReflectStubFn: func(caller func(string, context.Context, []any, []any) error) any {
+			return a_reflect_stub{caller: caller}
 		},
 		RefData: "⟦627f661b:wEaVeReDgE:github.com/ServiceWeaver/weaver/internal/tool/generate/example/A→github.com/ServiceWeaver/weaver/internal/tool/generate/example/B⟧\n⟦26168bd7:wEaVeRlIsTeNeRs:github.com/ServiceWeaver/weaver/internal/tool/generate/example/A→lis2,renamed_listener⟧\n",
 	})
@@ -66,6 +49,9 @@ func init() {
 		},
 		ServerStubFn: func(impl any, addLoad func(uint64, float64)) codegen.Server {
 			return b_server_stub{impl: impl.(B), addLoad: addLoad}
+		},
+		ReflectStubFn: func(caller func(string, context.Context, []any, []any) error) any {
+			return b_reflect_stub{caller: caller}
 		},
 		RefData: "⟦6971bce2:wEaVeReDgE:github.com/ServiceWeaver/weaver/internal/tool/generate/example/B→github.com/ServiceWeaver/weaver/internal/tool/generate/example/A⟧\n⟦c9c43570:wEaVeRlIsTeNeRs:github.com/ServiceWeaver/weaver/internal/tool/generate/example/B→lis2,renamed_listener⟧\n",
 	})
@@ -448,6 +434,29 @@ func (s b_client_stub) M2(ctx context.Context, a0 int, a1 string, a2 bool, a3 [1
 	return
 }
 
+// Note that "weaver generate" will always generate the error message below.
+// Everything is okay. The error message is only relevant if you see it when
+// you run "go build" or "go run".
+var _ codegen.LatestVersion = codegen.Version[[0][20]struct{}](`
+
+ERROR: You generated this file with 'weaver generate' (devel) (codegen
+version v0.20.0). The generated code is incompatible with the version of the
+github.com/ServiceWeaver/weaver module that you're using. The weaver module
+version can be found in your go.mod file or by running the following command.
+
+    go list -m github.com/ServiceWeaver/weaver
+
+We recommend updating the weaver module and the 'weaver generate' command by
+running the following.
+
+    go get github.com/ServiceWeaver/weaver@latest
+    go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
+
+Then, re-run 'weaver generate' and re-build your code. If the problem persists,
+please file an issue at https://github.com/ServiceWeaver/weaver/issues.
+
+`)
+
 // Server stub implementations.
 
 type a_server_stub struct {
@@ -644,6 +653,42 @@ func (s b_server_stub) m2(ctx context.Context, args []byte) (res []byte, err err
 	(r0).WeaverMarshal(enc)
 	enc.Error(appErr)
 	return enc.Data(), nil
+}
+
+// Reflect stub implementations.
+
+type a_reflect_stub struct {
+	caller func(string, context.Context, []any, []any) error
+}
+
+// Check that a_reflect_stub implements the A interface.
+var _ A = (*a_reflect_stub)(nil)
+
+func (s a_reflect_stub) M1(ctx context.Context, a0 int, a1 string, a2 bool, a3 [10]int, a4 []string, a5 map[bool]int, a6 message) (r0 pair, err error) {
+	err = s.caller("M1", ctx, []any{a0, a1, a2, a3, a4, a5, a6}, []any{&r0})
+	return
+}
+
+func (s a_reflect_stub) M2(ctx context.Context, a0 int, a1 string, a2 bool, a3 [10]int, a4 []string, a5 map[bool]int, a6 message) (r0 pair, err error) {
+	err = s.caller("M2", ctx, []any{a0, a1, a2, a3, a4, a5, a6}, []any{&r0})
+	return
+}
+
+type b_reflect_stub struct {
+	caller func(string, context.Context, []any, []any) error
+}
+
+// Check that b_reflect_stub implements the B interface.
+var _ B = (*b_reflect_stub)(nil)
+
+func (s b_reflect_stub) M1(ctx context.Context, a0 int, a1 string, a2 bool, a3 [10]int, a4 []string, a5 map[bool]int, a6 message) (r0 pair, err error) {
+	err = s.caller("M1", ctx, []any{a0, a1, a2, a3, a4, a5, a6}, []any{&r0})
+	return
+}
+
+func (s b_reflect_stub) M2(ctx context.Context, a0 int, a1 string, a2 bool, a3 [10]int, a4 []string, a5 map[bool]int, a6 message) (r0 pair, err error) {
+	err = s.caller("M2", ctx, []any{a0, a1, a2, a3, a4, a5, a6}, []any{&r0})
+	return
 }
 
 // AutoMarshal implementations.

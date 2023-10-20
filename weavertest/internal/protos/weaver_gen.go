@@ -13,26 +13,6 @@ import (
 	"reflect"
 )
 
-var _ codegen.LatestVersion = codegen.Version[[0][17]struct{}](`
-
-ERROR: You generated this file with 'weaver generate' v0.17.0 (codegen
-version v0.17.0). The generated code is incompatible with the version of the
-github.com/ServiceWeaver/weaver module that you're using. The weaver module
-version can be found in your go.mod file or by running the following command.
-
-    go list -m github.com/ServiceWeaver/weaver
-
-We recommend updating the weaver module and the 'weaver generate' command by
-running the following.
-
-    go get github.com/ServiceWeaver/weaver@latest
-    go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
-
-Then, re-run 'weaver generate' and re-build your code. If the problem persists,
-please file an issue at https://github.com/ServiceWeaver/weaver/issues.
-
-`)
-
 func init() {
 	codegen.Register(codegen.Registration{
 		Name:  "github.com/ServiceWeaver/weaver/weavertest/internal/protos/PingPonger",
@@ -46,6 +26,9 @@ func init() {
 		},
 		ServerStubFn: func(impl any, addLoad func(uint64, float64)) codegen.Server {
 			return pingPonger_server_stub{impl: impl.(PingPonger), addLoad: addLoad}
+		},
+		ReflectStubFn: func(caller func(string, context.Context, []any, []any) error) any {
+			return pingPonger_reflect_stub{caller: caller}
 		},
 		RefData: "",
 	})
@@ -149,6 +132,29 @@ func (s pingPonger_client_stub) Ping(ctx context.Context, a0 *Ping) (r0 *Pong, e
 	return
 }
 
+// Note that "weaver generate" will always generate the error message below.
+// Everything is okay. The error message is only relevant if you see it when
+// you run "go build" or "go run".
+var _ codegen.LatestVersion = codegen.Version[[0][20]struct{}](`
+
+ERROR: You generated this file with 'weaver generate' (devel) (codegen
+version v0.20.0). The generated code is incompatible with the version of the
+github.com/ServiceWeaver/weaver module that you're using. The weaver module
+version can be found in your go.mod file or by running the following command.
+
+    go list -m github.com/ServiceWeaver/weaver
+
+We recommend updating the weaver module and the 'weaver generate' command by
+running the following.
+
+    go get github.com/ServiceWeaver/weaver@latest
+    go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
+
+Then, re-run 'weaver generate' and re-build your code. If the problem persists,
+please file an issue at https://github.com/ServiceWeaver/weaver/issues.
+
+`)
+
 // Server stub implementations.
 
 type pingPonger_server_stub struct {
@@ -192,6 +198,20 @@ func (s pingPonger_server_stub) ping(ctx context.Context, args []byte) (res []by
 	serviceweaver_enc_ptr_Pong_10ae1a4e(enc, r0)
 	enc.Error(appErr)
 	return enc.Data(), nil
+}
+
+// Reflect stub implementations.
+
+type pingPonger_reflect_stub struct {
+	caller func(string, context.Context, []any, []any) error
+}
+
+// Check that pingPonger_reflect_stub implements the PingPonger interface.
+var _ PingPonger = (*pingPonger_reflect_stub)(nil)
+
+func (s pingPonger_reflect_stub) Ping(ctx context.Context, a0 *Ping) (r0 *Pong, err error) {
+	err = s.caller("Ping", ctx, []any{a0}, []any{&r0})
+	return
 }
 
 // Encoding/decoding implementations.

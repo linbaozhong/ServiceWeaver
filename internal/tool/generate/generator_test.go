@@ -47,7 +47,7 @@ func init() {
 	weaverSrcDir = filepath.Join(testDir, "../../../")
 	goModFile = fmt.Sprintf(`module "foo"
 
-go 1.18
+go 1.21
 
 require github.com/ServiceWeaver/weaver v0.0.0
 replace github.com/ServiceWeaver/weaver => %s
@@ -226,11 +226,11 @@ func TestGenerator(t *testing.T) {
 				if strings.Contains(output, expect) {
 					continue
 				}
-				t.Errorf("output does not contain expected string %q", expect)
+				t.Errorf("output does not contain expected string %q in\n%s", expect, output)
 			}
 			for _, unexpect := range unexpected {
 				if strings.Contains(output, unexpect) {
-					t.Errorf("output contains unexpected string %q", unexpect)
+					t.Errorf("output contains unexpected string %q in \n%s", unexpect, output)
 				}
 			}
 		})
@@ -459,7 +459,7 @@ func TestExampleVersion(t *testing.T) {
 	got := fmt.Sprintf("%x", h.Sum(nil))
 
 	// If weaver_gen.go has changed, the codegen version may need updating.
-	const want = "149188524b7639a9470071875e68668c38b3145cd5f7d98559e1158da7761e4e"
+	const want = "872c34c2f9a62ebcb5085494bbdc92e127d1188b5e171e4f95a8d2f87518c5d6"
 	if got != want {
 		t.Fatalf(`Unexpected SHA-256 hash of examples/weaver_gen.go: got %s, want %s. If this change is meaningful, REMEMBER TO UPDATE THE CODEGEN VERSION in runtime/version/version.go.`, got, want)
 	}

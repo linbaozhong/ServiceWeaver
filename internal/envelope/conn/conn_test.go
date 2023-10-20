@@ -103,11 +103,10 @@ func makeConnections(t *testing.T, handler conn.EnvelopeHandler) (*conn.Envelope
 
 	// Construct the conns.
 	wlet := &protos.EnvelopeInfo{
-		App:           "app",
-		DeploymentId:  uuid.New().String(),
-		Id:            uuid.New().String(),
-		SingleProcess: true,
-		SingleMachine: true,
+		App:             "app",
+		DeploymentId:    uuid.New().String(),
+		Id:              uuid.New().String(),
+		InternalAddress: "localhost:0",
 	}
 
 	// NOTE: We must start the weavelet conn in a separate goroutine because
@@ -122,9 +121,8 @@ func makeConnections(t *testing.T, handler conn.EnvelopeHandler) (*conn.Envelope
 			panic(err)
 		}
 		created <- struct{}{}
-		err = w.Serve(nil)
+		err = w.Serve(ctx, nil)
 		weaveletDone <- err
-
 	}()
 
 	e, err := conn.NewEnvelopeConn(ctx, eReader, eWriter, wlet)
@@ -147,7 +145,7 @@ func makeConnections(t *testing.T, handler conn.EnvelopeHandler) (*conn.Envelope
 			t.Fatal(err)
 		}
 		err = <-weaveletDone
-		if err != nil && !errors.Is(err, io.EOF) && !strings.Contains(err.Error(), "file already closed") {
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) && !strings.Contains(err.Error(), "file already closed") {
 			t.Fatal("weavelet failed", err)
 		}
 	})

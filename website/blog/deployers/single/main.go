@@ -51,16 +51,11 @@ func main() {
 func deploy(binary string) error {
 	// Spawn the weavelet.
 	info := &protos.EnvelopeInfo{
-		App:           "app",               // the application name
-		DeploymentId:  uuid.New().String(), // the deployment id
-		Id:            uuid.New().String(), // the weavelet id
-		SingleMachine: true,                // is the app on a single machine?
-		RunMain:       true,                // should the weavelet run main?
-
-		// Note that we could set SingleProcess to true, but if we did, the
-		// envelope wouldn't receive any requests. We set it to false to
-		// demonstrate the weavelet-envelope interaction.
-		SingleProcess: false, // is the app a single process?
+		App:             "app",               // the application name
+		DeploymentId:    uuid.New().String(), // the deployment id
+		Id:              uuid.New().String(), // the weavelet id
+		RunMain:         true,                // should the weavelet run main?
+		InternalAddress: "localhost:0",       // internal address of the weavelet
 	}
 	config := &protos.AppConfig{
 		Name:   "app",  // the application name
@@ -80,10 +75,10 @@ func (d *deployer) ActivateComponent(_ context.Context, req *protos.ActivateComp
 	d.components = append(d.components, req.Component)
 
 	// Tell the weavelet to run the component.
-	d.envelope.UpdateComponents(d.components) //nolint:errcheck // omitted for brevity
+	d.envelope.UpdateComponents(d.components)
 
 	// Tell the weavelet to route requests to the component locally.
-	d.envelope.UpdateRoutingInfo(&protos.RoutingInfo{ //nolint:errcheck // omitted for brevity
+	d.envelope.UpdateRoutingInfo(&protos.RoutingInfo{
 		Component: req.Component,
 		Local:     true,
 	})
@@ -115,6 +110,7 @@ func (d *deployer) HandleTraceSpans(context.Context, *protos.TraceSpans) error {
 	return nil
 }
 
+// Responsibility 4: Security.
 func (*deployer) GetSelfCertificate(context.Context, *protos.GetSelfCertificateRequest) (*protos.GetSelfCertificateReply, error) {
 	// This deployer doesn't enable mTLS.
 	panic("unused")

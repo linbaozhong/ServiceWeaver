@@ -35,6 +35,7 @@ import (
 	"unicode"
 
 	"github.com/ServiceWeaver/weaver/internal/files"
+	"github.com/ServiceWeaver/weaver/internal/tool"
 	"github.com/ServiceWeaver/weaver/runtime/codegen"
 	"github.com/ServiceWeaver/weaver/runtime/colors"
 	"github.com/ServiceWeaver/weaver/runtime/version"
@@ -247,6 +248,19 @@ func newGenerator(opt Options, pkg *packages.Package, fset *token.FileSet, autom
 			components[c.fullIntfName()] = c
 		}
 	}
+
+	// Find method attributes.
+	for _, file := range pkg.Syntax {
+		filename := fset.Position(file.Package).Filename
+		if filepath.Base(filename) == generatedCodeFile {
+			// Ignore weaver_gen.go files.
+			continue
+		}
+		if err := findMethodAttributes(pkg, file, components); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
@@ -290,6 +304,74 @@ func findComponents(opt Options, pkg *packages.Package, f *ast.File, tset *typeS
 		}
 	}
 	return components, errors.Join(errs...)
+}
+
+func findMethodAttributes(pkg *packages.Package, f *ast.File, components map[string]*component) error {
+	// Look for declarations of the form:
+	//	var _ weaver.NotRetriable = Component.Method
+	var errs []error
+	for _, decl := range f.Decls {
+		gendecl, ok := decl.(*ast.GenDecl)
+		if !ok || gendecl.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gendecl.Specs {
+			valspec, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			typeAndValue, ok := pkg.TypesInfo.Types[valspec.Type]
+			if !ok {
+				continue
+			}
+			t := typeAndValue.Type
+			if !isWeaverNotRetriable(t) {
+				continue
+			}
+			for _, val := range valspec.Values {
+				// We allow non-blank vars for uniformity.
+				comp, method, ok := findComponentMethod(pkg, components, val)
+				if !ok {
+					errs = append(errs, errorf(pkg.Fset, valspec.Pos(), "weaver.NonRetriable should only be assigned a value that identifies a method of a component implemented by this package"))
+					continue
+				}
+				if comp.noretry == nil {
+					comp.noretry = map[string]struct{}{}
+				}
+				comp.noretry[method] = struct{}{}
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// findComponentMethod returns the component and method if val is an expression of
+// the form C.M where C is a component listed in components and C has a method named M.
+func findComponentMethod(pkg *packages.Package, components map[string]*component, val ast.Expr) (*component, string, bool) {
+	sel, ok := val.(*ast.SelectorExpr)
+	if !ok {
+		return nil, "", false
+	}
+	ctypeval, ok := pkg.TypesInfo.Types[sel.X]
+	if !ok {
+		return nil, "", false
+	}
+	ctype, ok := ctypeval.Type.(*types.Named)
+	if !ok {
+		return nil, "", false
+	}
+	cname := fullName(ctype)
+	c, ok := components[cname]
+	if !ok {
+		return nil, "", false
+	}
+	method := sel.Sel.Name
+	for _, m := range c.methods() {
+		if m.Name() == method {
+			return c, method, true
+		}
+	}
+	return nil, "", false
 }
 
 // findAutoMarshals returns the types in the provided file which embed the
@@ -510,6 +592,16 @@ func extractComponent(opt Options, pkg *packages.Package, file *ast.File, tset *
 		return nil, err
 	}
 
+	// Check that listener names are unique.
+	seenLis := map[string]struct{}{}
+	for _, lis := range listeners {
+		if _, ok := seenLis[lis]; ok {
+			return nil, errorf(pkg.Fset, spec.Pos(),
+				"component implementation %s declares multiple listeners with name %s. Please disambiguate.", formatType(pkg, impl), lis)
+		}
+		seenLis[lis] = struct{}{}
+	}
+
 	// Warn the user if the component has a mistyped Init method. Init methods
 	// are supposed to have type "func(context.Context) error", but it's easy
 	// to forget to add a context.Context argument or error return. Without
@@ -585,14 +677,15 @@ func getListenerNamesFromStructField(pkg *packages.Package, f *ast.Field) ([]str
 //	}
 //	type router struct{}
 type component struct {
-	intf          *types.Named    // component interface
-	impl          *types.Named    // component implementation
-	router        *types.Named    // router, or nil if there is no router
-	routingKey    types.Type      // routing key, or nil if there is no router
-	routedMethods map[string]bool // the set of methods with a routing function
-	isMain        bool            // intf is weaver.Main
-	refs          []*types.Named  // List of T where a weaver.Ref[T] field is in impl struct
-	listeners     []string        // Names of listener fields declared in impl struct
+	intf          *types.Named        // component interface
+	impl          *types.Named        // component implementation
+	router        *types.Named        // router, or nil if there is no router
+	routingKey    types.Type          // routing key, or nil if there is no router
+	routedMethods map[string]bool     // the set of methods with a routing function
+	isMain        bool                // intf is weaver.Main
+	refs          []*types.Named      // List of T where a weaver.Ref[T] field is in impl struct
+	listeners     []string            // Names of listener fields declared in impl struct
+	noretry       map[string]struct{} // Methods that should not be retried
 }
 
 func fullName(t *types.Named) string {
@@ -822,13 +915,16 @@ func (g *generator) generate() error {
 		fn := func(format string, args ...interface{}) {
 			fmt.Fprintln(&body, fmt.Sprintf(format, args...))
 		}
-		g.generateVersionCheck(fn)
 		g.generateRegisteredComponents(fn)
 		g.generateInstanceChecks(fn)
 		g.generateRouterChecks(fn)
 		g.generateLocalStubs(fn)
 		g.generateClientStubs(fn)
+		if err := g.generateVersionCheck(fn); err != nil {
+			return err
+		}
 		g.generateServerStubs(fn)
+		g.generateReflectStubs(fn)
 		g.generateAutoMarshalMethods(fn)
 		g.generateRouterMethods(fn)
 		g.generateEncDecMethods(fn)
@@ -914,24 +1010,34 @@ func (g *generator) generateImports(p printFn) {
 	p("")
 	p(`import (`)
 	for _, imp := range g.tset.imports() {
-		if imp.alias == "" {
+		switch {
+		case imp.local:
+			// Already inside desired package
+		case imp.alias == "":
 			p(`	%s`, strconv.Quote(imp.path))
-		} else {
+		default:
 			p(`	%s %s`, imp.alias, strconv.Quote(imp.path))
 		}
 	}
 	p(`)`)
 }
 
-func (g *generator) generateVersionCheck(p printFn) {
+func (g *generator) generateVersionCheck(p printFn) error {
+	selfVersion, err := tool.SelfVersion()
+	if err != nil {
+		return fmt.Errorf("read self version: %w", err)
+	}
+
 	// Example output when 'weaver generate' has codegen API version 0.1.0:
 	//
 	//     var _ codegen.LatestVersion = codegen.Version[[0][1]struct{}]("You used ...")
 	p(``)
+	p(`// Note that "weaver generate" will always generate the error message below.`)
+	p(`// Everything is okay. The error message is only relevant if you see it when`)
+	p(`// you run "go build" or "go run".`)
 	p(`var _ %s = %s[[%d][%d]struct{}](%s)`,
 		g.codegen().qualify("LatestVersion"), g.codegen().qualify("Version"),
 		version.CodegenMajor, version.CodegenMinor,
-
 		fmt.Sprintf("`"+`
 
 ERROR: You generated this file with 'weaver generate' %s (codegen
@@ -950,8 +1056,9 @@ running the following.
 Then, re-run 'weaver generate' and re-build your code. If the problem persists,
 please file an issue at https://github.com/ServiceWeaver/weaver/issues.
 
-`+"`", version.ModuleVersion, version.CodegenVersion),
+`+"`", selfVersion, version.CodegenVersion),
 	)
+	return nil
 }
 
 // generateInstanceChecks generates code that checks that every component
@@ -1106,6 +1213,17 @@ func (g *generator) generateRegisteredComponents(p printFn) {
 		//   }
 		serverStubFn := fmt.Sprintf(`func(impl any, addLoad func(uint64, float64)) %s { return %s_server_stub{impl: impl.(%s), addLoad: addLoad } }`, g.codegen().qualify("Server"), notExported(name), g.componentRef(comp))
 
+		// E.g.,
+		//   func(caller func(string, context.Context, []any) ([]any, error)) any {
+		//       return foo_reflect_stub{caller: caller}
+		//   }
+		reflect := g.tset.importPackage("reflect", "reflect")
+		context := g.tset.importPackage("context", "context")
+		reflectStubFn := fmt.Sprintf(
+			`func(caller func(string, %s, []any, []any) error) any { return %s_reflect_stub{caller: caller} }`,
+			context.qualify("Context"), notExported(name),
+		)
+
 		var refData strings.Builder
 		myName := comp.fullIntfName()
 		for _, ref := range comp.refs {
@@ -1120,7 +1238,6 @@ func (g *generator) generateRegisteredComponents(p printFn) {
 		//	    Props: codegen.ComponentProperties{},
 		//	    ...,
 		//	})
-		reflect := g.tset.importPackage("reflect", "reflect")
 		p(`	%s(%s{`, g.codegen().qualify("Register"), g.codegen().qualify("Registration"))
 		p(`		Name: %q,`, myName)
 		// To get a reflect.Type for an interface, we have to first get a type
@@ -1138,13 +1255,35 @@ func (g *generator) generateRegisteredComponents(p printFn) {
 			}
 			p(`		Listeners: []string{%s},`, strings.Join(listeners, ", "))
 		}
+		if len(comp.noretry) > 0 {
+			p(`		NoRetry: []int{%s},`, noRetryString(comp))
+		}
 		p(`		LocalStubFn: %s,`, localStubFn)
 		p(`		ClientStubFn: %s,`, clientStubFn)
 		p(`		ServerStubFn: %s,`, serverStubFn)
+		p(`		ReflectStubFn: %s,`, reflectStubFn)
 		p(`		RefData: %s,`, strconv.Quote(refData.String()))
 		p(`	})`)
 	}
 	p(`}`)
+}
+
+// noRetryString generates a string of the form "i_1, i_2, ... i_n" where the
+// individual elements are the indices of methods in comp.retry that should not
+// be retried.
+func noRetryString(comp *component) string {
+	list := make([]int, 0, len(comp.noretry))
+	for i, m := range comp.methods() {
+		if _, ok := comp.noretry[m.Name()]; ok {
+			list = append(list, i)
+		}
+	}
+	sort.Ints(list)
+	strs := make([]string, 0, len(list))
+	for _, i := range list {
+		strs = append(strs, strconv.Itoa(i))
+	}
+	return strings.Join(strs, ", ")
 }
 
 // generateLocalStubs generates code that creates stubs for the local components.
@@ -1812,6 +1951,50 @@ func (g *generator) generateServerStubs(p printFn) {
 			}
 			p(`	enc.Error(appErr)`)
 			p(`	return enc.Data(), nil`)
+			p(`}`)
+		}
+	}
+}
+
+// generateReflectStubs generates code for reflect stubs. A reflect stub
+// represents all component method arguments and results as type any and uses a
+// provided caller function to execute the method call.
+func (g *generator) generateReflectStubs(p printFn) {
+	p(``)
+	p(``)
+	p(`// Reflect stub implementations.`)
+
+	ts := g.tset.genTypeString
+	for _, comp := range g.components {
+		stub := notExported(comp.intfName()) + "_reflect_stub"
+		context := g.tset.importPackage("context", "context")
+		p(``)
+		p(`type %s struct{`, stub)
+		p(`	caller func(string, %s, []any, []any) error`, context.qualify("Context"))
+		p(`}`)
+
+		p(``)
+		p(`// Check that %s implements the %s interface.`, stub, ts(comp.intf))
+		p(`var _ %s = (*%s)(nil)`, ts(comp.intf), stub)
+		p(``)
+
+		for _, m := range comp.methods() {
+			mt := m.Type().(*types.Signature)
+
+			args := make([]string, mt.Params().Len()-1)
+			for i := 1; i < mt.Params().Len(); i++ {
+				args[i-1] = fmt.Sprintf("a%d", i-1)
+			}
+
+			results := make([]string, mt.Results().Len()-1)
+			for i := 0; i < mt.Results().Len()-1; i++ {
+				results[i] = fmt.Sprintf("&r%d", i)
+			}
+
+			p(``)
+			p(`func (s %s) %s(%s) (%s) {`, stub, m.Name(), g.args(mt), g.returns(mt))
+			p(`	err = s.caller(%q, ctx, []any{%s}, []any{%s})`, m.Name(), strings.Join(args, ","), strings.Join(results, ","))
+			p(`	return`)
 			p(`}`)
 		}
 	}

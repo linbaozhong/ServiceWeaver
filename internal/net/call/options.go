@@ -15,12 +15,17 @@
 package call
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/ServiceWeaver/weaver/internal/traceio"
 	"github.com/ServiceWeaver/weaver/runtime/logging"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/exp/slog"
+)
+
+const (
+	defaultWriteFlattenLimit     = 4 << 10
+	defaultInlineHandlerDuration = 20 * time.Microsecond
 )
 
 // ClientOptions are the options to configure an RPC client.
@@ -35,8 +40,9 @@ type ClientOptions struct {
 	// before blocking, waiting for the results.
 	OptimisticSpinDuration time.Duration
 
-	// If non-zero, all writes smaller than this limit are flattened into
-	// a single buffer before being written on the connection.
+	// All writes smaller than this limit are flattened into a single
+	// buffer before being written on the connection. If zero, an appropriate
+	// value is picked automatically. If negative, no flattening is done.
 	WriteFlattenLimit int
 }
 
@@ -48,28 +54,31 @@ type ServerOptions struct {
 	// Tracer. Defaults to a discarding tracer.
 	Tracer trace.Tracer
 
-	// If non-zero, calls on the server are inlined and a new goroutine is
+	// If positive, calls on the server are inlined and a new goroutine is
 	// launched only if the call takes longer than the provided duration.
+	// If zero, the system inlines call execution and automatically picks a
+	// reasonable delay before the new goroutine is launched.
+	// If negative, handlers are always started in a new goroutine.
 	InlineHandlerDuration time.Duration
 
-	// If non-zero, all writes smaller than this limit are flattened into
-	// a single buffer before being written on the connection.
+	// All writes smaller than this limit are flattened into a single
+	// buffer before being written on the connection. If zero, an appropriate
+	// value is picked automatically. If negative, no flattening is done.
 	WriteFlattenLimit int
 }
 
 // CallOptions are call-specific options.
 type CallOptions struct {
+	// Retry indicates whether or not calls that failed due to communication
+	// errors should be retried.
+	Retry bool
+
 	// ShardKey, if not 0, is the shard key that a Balancer can use to route a
 	// call. A Balancer can always choose to ignore the ShardKey.
 	//
 	// TODO(mwhittaker): Figure out a way to have 0 be a valid shard key. Could
 	// change to *uint64 for example.
 	ShardKey uint64
-
-	// Balancer, if not nil, is the Balancer to use for a call, instead of the
-	// Balancer that the client was constructed with (provided in
-	// ClientOptions).
-	Balancer Balancer
 }
 
 // withDefaults returns a copy of the ClientOptions with zero values replaced
@@ -80,6 +89,9 @@ func (c ClientOptions) withDefaults() ClientOptions {
 	}
 	if c.Balancer == nil {
 		c.Balancer = RoundRobin()
+	}
+	if c.WriteFlattenLimit == 0 {
+		c.WriteFlattenLimit = defaultWriteFlattenLimit
 	}
 	return c
 }
@@ -92,6 +104,12 @@ func (s ServerOptions) withDefaults() ServerOptions {
 	}
 	if s.Tracer == nil {
 		s.Tracer = traceio.TestTracer()
+	}
+	if s.InlineHandlerDuration == 0 {
+		s.InlineHandlerDuration = defaultInlineHandlerDuration
+	}
+	if s.WriteFlattenLimit == 0 {
+		s.WriteFlattenLimit = defaultWriteFlattenLimit
 	}
 	return s
 }

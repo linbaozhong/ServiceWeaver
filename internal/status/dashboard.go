@@ -143,7 +143,7 @@ Flags:
 			url := "http://" + lis.Addr().String()
 
 			fmt.Fprintln(os.Stderr, "Dashboard available at:", url)
-			go browser.OpenURL(url) //nolint:errcheck // browser open is optional
+			go browser.OpenURL(url)
 			return http.Serve(lis, nil)
 		},
 	}
@@ -210,9 +210,6 @@ func (d *dashboard) handleDeployment(w http.ResponseWriter, r *http.Request) {
 	// on the deployment page.
 	sort.Slice(status.Components, func(i, j int) bool {
 		ci, cj := status.Components[i], status.Components[j]
-		if ci.Group != cj.Group {
-			return ci.Group < cj.Group
-		}
 		return ci.Name < cj.Name
 	})
 	for _, component := range status.Components {
@@ -312,7 +309,7 @@ func (d *dashboard) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	var b bytes.Buffer
 	imetrics.TranslateMetricsToPrometheusTextFormat(&b, snapshots, reg.Addr, prometheusEndpoint)
-	w.Write(b.Bytes()) //nolint:errcheck // response write error
+	w.Write(b.Bytes())
 }
 
 // handleTraces handles requests to /traces?id=<deployment id>
@@ -403,5 +400,5 @@ func (d *dashboard) handleTraceFetch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("cannot encode spans: %v", err), http.StatusInternalServerError)
 		return
 	}
-	w.Write(data) //nolint:errcheck // response write error
+	w.Write(data)
 }

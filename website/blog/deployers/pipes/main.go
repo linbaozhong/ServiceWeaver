@@ -62,7 +62,7 @@ func run(ctx context.Context, binary string) error {
 	// https://pkg.go.dev/os/exec#Cmd for details.
 	cmd := exec.Command(binary)
 	cmd.ExtraFiles = []*os.File{weaveletReader, weaveletWriter}
-	cmd.Env = []string{"ENVELOPE_TO_WEAVELET_FD=3", "WEAVELET_TO_ENVELOPE_FD=4"}
+	cmd.Env = append(cmd.Environ(), "ENVELOPE_TO_WEAVELET_FD=3", "WEAVELET_TO_ENVELOPE_FD=4")
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -70,12 +70,11 @@ func run(ctx context.Context, binary string) error {
 	// Step 2. Send an EnvelopeInfo to the weavelet.
 	info := &protos.EnvelopeMsg{
 		EnvelopeInfo: &protos.EnvelopeInfo{
-			App:           "app",               // the application name
-			DeploymentId:  uuid.New().String(), // the deployment id
-			Id:            uuid.New().String(), // the weavelet id
-			SingleProcess: false,               // is the app a single process?
-			SingleMachine: true,                // is the app on a single machine?
-			RunMain:       true,                // should the weavelet run main?
+			App:             "app",               // the application name
+			DeploymentId:    uuid.New().String(), // the deployment id
+			Id:              uuid.New().String(), // the weavelet id
+			RunMain:         true,                // should the weavelet run main?
+			InternalAddress: "localhost:0",       // internal address of the weavelet
 		},
 	}
 	if err := protomsg.Write(envelopeWriter, info); err != nil {

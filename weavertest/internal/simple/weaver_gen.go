@@ -13,32 +13,13 @@ import (
 	"reflect"
 )
 
-var _ codegen.LatestVersion = codegen.Version[[0][17]struct{}](`
-
-ERROR: You generated this file with 'weaver generate' v0.17.0 (codegen
-version v0.17.0). The generated code is incompatible with the version of the
-github.com/ServiceWeaver/weaver module that you're using. The weaver module
-version can be found in your go.mod file or by running the following command.
-
-    go list -m github.com/ServiceWeaver/weaver
-
-We recommend updating the weaver module and the 'weaver generate' command by
-running the following.
-
-    go get github.com/ServiceWeaver/weaver@latest
-    go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
-
-Then, re-run 'weaver generate' and re-build your code. If the problem persists,
-please file an issue at https://github.com/ServiceWeaver/weaver/issues.
-
-`)
-
 func init() {
 	codegen.Register(codegen.Registration{
-		Name:   "github.com/ServiceWeaver/weaver/weavertest/internal/simple/Destination",
-		Iface:  reflect.TypeOf((*Destination)(nil)).Elem(),
-		Impl:   reflect.TypeOf(destination{}),
-		Routed: true,
+		Name:    "github.com/ServiceWeaver/weaver/weavertest/internal/simple/Destination",
+		Iface:   reflect.TypeOf((*Destination)(nil)).Elem(),
+		Impl:    reflect.TypeOf(destination{}),
+		Routed:  true,
+		NoRetry: []int{2, 3},
 		LocalStubFn: func(impl any, caller string, tracer trace.Tracer) any {
 			return destination_local_stub{impl: impl.(Destination), tracer: tracer, getAllMetrics: codegen.MethodMetricsFor(codegen.MethodLabels{Caller: caller, Component: "github.com/ServiceWeaver/weaver/weavertest/internal/simple/Destination", Method: "GetAll", Remote: false}), getpidMetrics: codegen.MethodMetricsFor(codegen.MethodLabels{Caller: caller, Component: "github.com/ServiceWeaver/weaver/weavertest/internal/simple/Destination", Method: "Getpid", Remote: false}), recordMetrics: codegen.MethodMetricsFor(codegen.MethodLabels{Caller: caller, Component: "github.com/ServiceWeaver/weaver/weavertest/internal/simple/Destination", Method: "Record", Remote: false}), routedRecordMetrics: codegen.MethodMetricsFor(codegen.MethodLabels{Caller: caller, Component: "github.com/ServiceWeaver/weaver/weavertest/internal/simple/Destination", Method: "RoutedRecord", Remote: false})}
 		},
@@ -47,6 +28,9 @@ func init() {
 		},
 		ServerStubFn: func(impl any, addLoad func(uint64, float64)) codegen.Server {
 			return destination_server_stub{impl: impl.(Destination), addLoad: addLoad}
+		},
+		ReflectStubFn: func(caller func(string, context.Context, []any, []any) error) any {
+			return destination_reflect_stub{caller: caller}
 		},
 		RefData: "",
 	})
@@ -64,12 +48,16 @@ func init() {
 		ServerStubFn: func(impl any, addLoad func(uint64, float64)) codegen.Server {
 			return server_server_stub{impl: impl.(Server), addLoad: addLoad}
 		},
+		ReflectStubFn: func(caller func(string, context.Context, []any, []any) error) any {
+			return server_reflect_stub{caller: caller}
+		},
 		RefData: "⟦1e2dce71:wEaVeRlIsTeNeRs:github.com/ServiceWeaver/weaver/weavertest/internal/simple/Server→hello⟧\n",
 	})
 	codegen.Register(codegen.Registration{
-		Name:  "github.com/ServiceWeaver/weaver/weavertest/internal/simple/Source",
-		Iface: reflect.TypeOf((*Source)(nil)).Elem(),
-		Impl:  reflect.TypeOf(source{}),
+		Name:    "github.com/ServiceWeaver/weaver/weavertest/internal/simple/Source",
+		Iface:   reflect.TypeOf((*Source)(nil)).Elem(),
+		Impl:    reflect.TypeOf(source{}),
+		NoRetry: []int{0},
 		LocalStubFn: func(impl any, caller string, tracer trace.Tracer) any {
 			return source_local_stub{impl: impl.(Source), tracer: tracer, emitMetrics: codegen.MethodMetricsFor(codegen.MethodLabels{Caller: caller, Component: "github.com/ServiceWeaver/weaver/weavertest/internal/simple/Source", Method: "Emit", Remote: false})}
 		},
@@ -78,6 +66,9 @@ func init() {
 		},
 		ServerStubFn: func(impl any, addLoad func(uint64, float64)) codegen.Server {
 			return source_server_stub{impl: impl.(Source), addLoad: addLoad}
+		},
+		ReflectStubFn: func(caller func(string, context.Context, []any, []any) error) any {
+			return source_reflect_stub{caller: caller}
 		},
 		RefData: "⟦bf914175:wEaVeReDgE:github.com/ServiceWeaver/weaver/weavertest/internal/simple/Source→github.com/ServiceWeaver/weaver/weavertest/internal/simple/Destination⟧\n",
 	})
@@ -752,6 +743,29 @@ func (s source_client_stub) Emit(ctx context.Context, a0 string, a1 string) (err
 	return
 }
 
+// Note that "weaver generate" will always generate the error message below.
+// Everything is okay. The error message is only relevant if you see it when
+// you run "go build" or "go run".
+var _ codegen.LatestVersion = codegen.Version[[0][20]struct{}](`
+
+ERROR: You generated this file with 'weaver generate' (devel) (codegen
+version v0.20.0). The generated code is incompatible with the version of the
+github.com/ServiceWeaver/weaver module that you're using. The weaver module
+version can be found in your go.mod file or by running the following command.
+
+    go list -m github.com/ServiceWeaver/weaver
+
+We recommend updating the weaver module and the 'weaver generate' command by
+running the following.
+
+    go get github.com/ServiceWeaver/weaver@latest
+    go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
+
+Then, re-run 'weaver generate' and re-build your code. If the problem persists,
+please file an issue at https://github.com/ServiceWeaver/weaver/issues.
+
+`)
+
 // Server stub implementations.
 
 type destination_server_stub struct {
@@ -1000,6 +1014,69 @@ func (s source_server_stub) emit(ctx context.Context, args []byte) (res []byte, 
 	enc := codegen.NewEncoder()
 	enc.Error(appErr)
 	return enc.Data(), nil
+}
+
+// Reflect stub implementations.
+
+type destination_reflect_stub struct {
+	caller func(string, context.Context, []any, []any) error
+}
+
+// Check that destination_reflect_stub implements the Destination interface.
+var _ Destination = (*destination_reflect_stub)(nil)
+
+func (s destination_reflect_stub) GetAll(ctx context.Context, a0 string) (r0 []string, err error) {
+	err = s.caller("GetAll", ctx, []any{a0}, []any{&r0})
+	return
+}
+
+func (s destination_reflect_stub) Getpid(ctx context.Context) (r0 int, err error) {
+	err = s.caller("Getpid", ctx, []any{}, []any{&r0})
+	return
+}
+
+func (s destination_reflect_stub) Record(ctx context.Context, a0 string, a1 string) (err error) {
+	err = s.caller("Record", ctx, []any{a0, a1}, []any{})
+	return
+}
+
+func (s destination_reflect_stub) RoutedRecord(ctx context.Context, a0 string, a1 string) (err error) {
+	err = s.caller("RoutedRecord", ctx, []any{a0, a1}, []any{})
+	return
+}
+
+type server_reflect_stub struct {
+	caller func(string, context.Context, []any, []any) error
+}
+
+// Check that server_reflect_stub implements the Server interface.
+var _ Server = (*server_reflect_stub)(nil)
+
+func (s server_reflect_stub) Address(ctx context.Context) (r0 string, err error) {
+	err = s.caller("Address", ctx, []any{}, []any{&r0})
+	return
+}
+
+func (s server_reflect_stub) ProxyAddress(ctx context.Context) (r0 string, err error) {
+	err = s.caller("ProxyAddress", ctx, []any{}, []any{&r0})
+	return
+}
+
+func (s server_reflect_stub) Shutdown(ctx context.Context) (err error) {
+	err = s.caller("Shutdown", ctx, []any{}, []any{})
+	return
+}
+
+type source_reflect_stub struct {
+	caller func(string, context.Context, []any, []any) error
+}
+
+// Check that source_reflect_stub implements the Source interface.
+var _ Source = (*source_reflect_stub)(nil)
+
+func (s source_reflect_stub) Emit(ctx context.Context, a0 string, a1 string) (err error) {
+	err = s.caller("Emit", ctx, []any{a0, a1}, []any{})
+	return
 }
 
 // Router methods.

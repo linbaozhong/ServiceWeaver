@@ -19,11 +19,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/ServiceWeaver/weaver/runtime/codegen"
+	"github.com/ServiceWeaver/weaver/runtime/graph"
 	"github.com/ServiceWeaver/weaver/runtime/version"
 	"github.com/google/go-cmp/cmp"
+	"golang.org/x/exp/slices"
 )
 
 func TestReadComponentGraph(t *testing.T) {
@@ -42,39 +45,53 @@ func TestReadComponentGraph(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// Read edges.
-			edges, err := ReadComponentGraph(binary)
+			// Read the component graph.
+			gotComponents, g, err := ReadComponentGraph(binary)
 			if err != nil {
 				t.Fatal(err)
 			}
-			found := map[string]bool{}
-			for _, edge := range edges {
-				t.Logf("edge %v", edge)
-				found[fmt.Sprintf("%s=>%s", edge[0], edge[1])] = true
-			}
 
-			// Check that expected edges are found.
+			// Compare returned components.
 			pkg := "github.com/ServiceWeaver/weaver/runtime/bin/testprogram"
 			main := "github.com/ServiceWeaver/weaver/Main"
-			for _, want := range []string{
-				fmt.Sprintf("%s=>%s/A", main, pkg),
-				fmt.Sprintf("%s/A=>%s/B", pkg, pkg),
-				fmt.Sprintf("%s/A=>%s/C", pkg, pkg),
-			} {
-				if !found[want] {
-					t.Errorf("did not find expected edge %q", want)
-				}
+			wantComponents := []string{
+				main,
+				fmt.Sprintf("%s/A", pkg),
+				fmt.Sprintf("%s/B", pkg),
+				fmt.Sprintf("%s/C", pkg),
+			}
+			if diff := cmp.Diff(wantComponents, gotComponents); diff != "" {
+				t.Fatalf("unexpected components: (-want +got): %s", diff)
 			}
 
-			// Check that other edges are not found.
-			for _, badedge := range []string{
-				fmt.Sprintf("%s/B=>%s/A", pkg, pkg),
-				fmt.Sprintf("%s/B=>%s/C", pkg, pkg),
-			} {
-				if found[badedge] {
-					t.Errorf("found unexpected edge %q", badedge)
-				}
+			// Collect nodes from the graph and compare.
+			var nodes []graph.Node
+			g.PerNode(func(n graph.Node) {
+				nodes = append(nodes, n)
+			})
+			slices.Sort(nodes)
+			if diff := cmp.Diff([]graph.Node{0, 1, 2, 3}, nodes); diff != "" {
+				t.Fatalf("unexpected nodes: (-want +got): %s", diff)
+			}
 
+			// Collect edges from the graph and compare.
+			var edges []graph.Edge
+			graph.PerEdge(g, func(e graph.Edge) {
+				edges = append(edges, e)
+			})
+			sort.Slice(edges, func(i, j int) bool {
+				x, y := edges[i], edges[j]
+				if x.Src == y.Src {
+					return x.Dst < y.Dst
+				}
+				return x.Src < y.Src
+			})
+			want := []graph.Edge{
+				{Src: 0, Dst: 1},
+				{Src: 1, Dst: 2},
+				{Src: 1, Dst: 3}}
+			if diff := cmp.Diff(want, edges); diff != "" {
+				t.Fatalf("unexpected edges: (-want +got): %s", diff)
 			}
 		})
 	}
@@ -122,25 +139,18 @@ func TestReadListeners(t *testing.T) {
 }
 
 func TestExtractVersion(t *testing.T) {
-	for _, want := range []Versions{
-		{
-			ModuleVersion:   version.SemVer{Major: 1, Minor: 2, Patch: 3},
-			DeployerVersion: version.SemVer{Major: 4, Minor: 5, Patch: 6},
-		},
-		{
-			ModuleVersion:   version.SemVer{Major: 100, Minor: 100, Patch: 234},
-			DeployerVersion: version.SemVer{Major: 0, Minor: 567, Patch: 8910},
-		},
+	for _, want := range []version.SemVer{
+		{Major: 4, Minor: 5, Patch: 6},
+		{Major: 0, Minor: 567, Patch: 8910},
 	} {
-		name := fmt.Sprintf("%s-%s", want.ModuleVersion, want.DeployerVersion)
-		t.Run(name, func(t *testing.T) {
+		t.Run(want.String(), func(t *testing.T) {
 			// Embed the version string inside a big array of bytes.
 			var bytes [10000]byte
-			embedded := fmt.Sprintf("⟦wEaVeRvErSiOn:module=%s;deployer=%s⟧", want.ModuleVersion, want.DeployerVersion)
+			embedded := fmt.Sprintf("⟦wEaVeRvErSiOn:deployer=%s⟧", want)
 			copy(bytes[1234:], []byte(embedded))
 
 			// Extract the version string.
-			got, err := extractVersions(bytes[:])
+			got, err := extractDeployerVersion(bytes[:])
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -172,8 +182,13 @@ func TestReadVersion(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.ModuleVersion != version.ModuleVersion {
-				t.Fatalf("bad module version: got %s, want %s", got.ModuleVersion, version.ModuleVersion)
+
+			// NOTE(spetrovic): Test binaries are built without module
+			// information, so we can't read the expected module value from
+			// the running test binary. For that reason, we only test that
+			// the testprogram module version is not empty.
+			if got.ModuleVersion == "" {
+				t.Fatalf("empty module version")
 			}
 			if got.DeployerVersion != version.DeployerVersion {
 				t.Fatalf("bad deployer version: got %s, want %s", got.DeployerVersion, version.DeployerVersion)

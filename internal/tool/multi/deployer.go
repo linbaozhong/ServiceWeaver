@@ -20,20 +20,27 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/ServiceWeaver/weaver"
 	imetrics "github.com/ServiceWeaver/weaver/internal/metrics"
 	"github.com/ServiceWeaver/weaver/internal/proxy"
+	"github.com/ServiceWeaver/weaver/internal/reflection"
 	"github.com/ServiceWeaver/weaver/internal/routing"
 	"github.com/ServiceWeaver/weaver/internal/status"
 	"github.com/ServiceWeaver/weaver/internal/tool/certs"
 	"github.com/ServiceWeaver/weaver/runtime"
 	"github.com/ServiceWeaver/weaver/runtime/bin"
+	"github.com/ServiceWeaver/weaver/runtime/deployers"
 	"github.com/ServiceWeaver/weaver/runtime/envelope"
+	"github.com/ServiceWeaver/weaver/runtime/graph"
 	"github.com/ServiceWeaver/weaver/runtime/logging"
 	"github.com/ServiceWeaver/weaver/runtime/metrics"
 	"github.com/ServiceWeaver/weaver/runtime/profiling"
@@ -41,8 +48,6 @@ import (
 	"github.com/ServiceWeaver/weaver/runtime/traces"
 	"github.com/google/uuid"
 	"golang.org/x/exp/maps"
-	"golang.org/x/exp/slices"
-	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -52,17 +57,18 @@ const defaultReplication = 2
 
 // A deployer manages an application deployment.
 type deployer struct {
-	ctx          context.Context
-	ctxCancel    context.CancelFunc
-	deploymentId string
-	config       *MultiConfig
-	started      time.Time
-	logger       *slog.Logger
-	caCert       *x509.Certificate
-	caKey        crypto.PrivateKey
-	running      errgroup.Group
-	logsDB       *logging.FileStore
-	traceDB      *traces.DB
+	ctx             context.Context
+	ctxCancel       context.CancelFunc
+	deploymentId    string
+	udsPath         string // Path to Unix domain socket
+	config          *MultiConfig
+	started         time.Time
+	logger          *slog.Logger
+	caCert          *x509.Certificate
+	caKey           crypto.PrivateKey
+	running         errgroup.Group
+	loggerComponent *logger
+	traceDB         *traces.DB
 
 	// statsProcessor tracks and computes stats to be rendered on the /statusz page.
 	statsProcessor *imetrics.StatsProcessor
@@ -107,12 +113,13 @@ var _ envelope.EnvelopeHandler = &handler{}
 
 // newDeployer creates a new deployer. The deployer can be stopped at any
 // time by canceling the passed-in context.
-func newDeployer(ctx context.Context, deploymentId string, config *MultiConfig) (*deployer, error) {
+func newDeployer(ctx context.Context, deploymentId string, config *MultiConfig, tmpDir string) (*deployer, error) {
 	// Create the log saver.
 	logsDB, err := logging.NewFileStore(logDir)
 	if err != nil {
 		return nil, fmt.Errorf("cannot create log storage: %w", err)
 	}
+	loggerComponent := newLogger(logsDB)
 	logger := slog.New(&logging.LogHandler{
 		Opts: logging.Options{
 			App:       config.App.Name,
@@ -120,7 +127,9 @@ func newDeployer(ctx context.Context, deploymentId string, config *MultiConfig) 
 			Weavelet:  uuid.NewString(),
 			Attrs:     []string{"serviceweaver/system", ""},
 		},
-		Write: logsDB.Add,
+		// Local log entries are relayed directly to loggerComponent
+		// without going through any stubs.
+		Write: loggerComponent.log,
 	})
 	var caCert *x509.Certificate
 	var caKey crypto.PrivateKey
@@ -137,20 +146,28 @@ func newDeployer(ctx context.Context, deploymentId string, config *MultiConfig) 
 		return nil, fmt.Errorf("cannot open Perfetto database: %w", err)
 	}
 
+	// Make Unix domain socket listener for serving hosted system components.
+	udsPath := filepath.Join(tmpDir, "socket")
+	uds, err := net.Listen("unix", udsPath)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	d := &deployer{
-		ctx:            ctx,
-		ctxCancel:      cancel,
-		logger:         logger,
-		caCert:         caCert,
-		caKey:          caKey,
-		logsDB:         logsDB,
-		traceDB:        traceDB,
-		statsProcessor: imetrics.NewStatsProcessor(),
-		deploymentId:   deploymentId,
-		config:         config,
-		started:        time.Now(),
-		proxies:        map[string]*proxyInfo{},
+		ctx:             ctx,
+		ctxCancel:       cancel,
+		udsPath:         udsPath,
+		logger:          logger,
+		caCert:          caCert,
+		caKey:           caKey,
+		loggerComponent: loggerComponent,
+		traceDB:         traceDB,
+		statsProcessor:  imetrics.NewStatsProcessor(),
+		deploymentId:    deploymentId,
+		config:          config,
+		started:         time.Now(),
+		proxies:         map[string]*proxyInfo{},
 	}
 
 	// Form co-location groups.
@@ -169,6 +186,15 @@ func newDeployer(ctx context.Context, deploymentId string, config *MultiConfig) 
 	d.running.Go(func() error {
 		<-d.ctx.Done()
 		err := d.ctx.Err()
+		d.stop(err)
+		return err
+	})
+
+	// Start a goroutine that serves calls to system components like multiLogger.
+	d.running.Go(func() error {
+		err := deployers.ServeComponents(d.ctx, uds, d.logger, map[string]any{
+			reflection.ComponentName[multiLogger](): loggerComponent,
+		})
 		d.stop(err)
 		return err
 	})
@@ -240,27 +266,19 @@ func (d *deployer) computeGroups() error {
 	// Use the call graph information to (1) identify all components in the
 	// application binary and create groups for them, and (2) compute the
 	// set of components a given group is allowed to invoke methods on.
-	callGraph, err := bin.ReadComponentGraph(d.config.App.Binary)
+	components, g, err := bin.ReadComponentGraph(d.config.App.Binary)
 	if err != nil {
 		return fmt.Errorf("cannot read the call graph from the application binary: %w", err)
 	}
-	for _, edge := range callGraph {
-		src := edge[0]
-		dst := edge[1]
-		if _, err := ensureGroup(dst); err != nil {
-			return err
-		}
-		srcGroup, err := ensureGroup(src)
-		if err != nil {
-			return err
-		}
+	g.PerNode(func(n graph.Node) {
+		ensureGroup(components[n])
+	})
+	graph.PerEdge(g, func(e graph.Edge) {
+		src := components[e.Src]
+		dst := components[e.Dst]
+		srcGroup := groups[src]
 		srcGroup.callable = append(srcGroup.callable, dst)
-	}
-
-	// Ensure we have a group for the main component.
-	if _, err := ensureGroup(runtime.Main); err != nil {
-		return err
-	}
+	})
 
 	d.groups = groups
 	return nil
@@ -272,7 +290,7 @@ func (d *deployer) computeGroups() error {
 //
 // REQUIRES: d.mu is NOT held.
 func (d *deployer) wait() error {
-	d.running.Wait() //nolint:errcheck // supplanted by b.err
+	d.running.Wait()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.err
@@ -323,14 +341,21 @@ func (d *deployer) startColocationGroup(g *group) error {
 	for r := 0; r < defaultReplication; r++ {
 		// Start the weavelet and capture its logs, traces, and metrics.
 		info := &protos.EnvelopeInfo{
-			App:           d.config.App.Name,
-			DeploymentId:  d.deploymentId,
-			Id:            uuid.New().String(),
-			Sections:      d.config.App.Sections,
-			SingleProcess: false,
-			SingleMachine: true,
-			RunMain:       g.started[runtime.Main],
-			Mtls:          d.config.Mtls,
+			App:             d.config.App.Name,
+			DeploymentId:    d.deploymentId,
+			Id:              uuid.New().String(),
+			Sections:        d.config.App.Sections,
+			RunMain:         g.started[runtime.Main],
+			Mtls:            d.config.Mtls,
+			InternalAddress: "localhost:0",
+			Redirects: []*protos.EnvelopeInfo_Redirect{
+				// Override the builtin logger.
+				{
+					Component: reflection.ComponentName[weaver.Logger](),
+					Target:    reflection.ComponentName[multiLogger](),
+					Address:   "unix://" + d.udsPath,
+				},
+			},
 		}
 		e, err := envelope.NewEnvelope(d.ctx, info, d.config.App)
 		if err != nil {
@@ -352,7 +377,7 @@ func (d *deployer) startColocationGroup(g *group) error {
 			d.stop(err)
 			return err
 		})
-		if err := d.registerReplica(g, wlet); err != nil {
+		if err := d.registerReplica(g, wlet, e.Pid()); err != nil {
 			return err
 		}
 		if err := e.UpdateComponents(components); err != nil {
@@ -507,14 +532,14 @@ func (d *deployer) activateComponent(req *protos.ActivateComponentRequest) error
 
 // registerReplica registers the information about a colocation group replica
 // (i.e., a weavelet).
-func (d *deployer) registerReplica(g *group, info *protos.WeaveletInfo) error {
+func (d *deployer) registerReplica(g *group, info *protos.WeaveletInfo, pid int) error {
 	// Update addresses and pids.
 	if g.addresses[info.DialAddr] {
 		// Replica already registered.
 		return nil
 	}
 	g.addresses[info.DialAddr] = true
-	g.pids = append(g.pids, info.Pid)
+	g.pids = append(g.pids, int64(pid))
 
 	// Update all assignments.
 	replicas := maps.Keys(g.addresses)
@@ -539,7 +564,7 @@ func (d *deployer) registerReplica(g *group, info *protos.WeaveletInfo) error {
 
 // HandleLogEntry implements the envelope.EnvelopeHandler interface.
 func (d *deployer) HandleLogEntry(_ context.Context, entry *protos.LogEntry) error {
-	d.logsDB.Add(entry)
+	d.loggerComponent.log(entry)
 	return nil
 }
 
@@ -641,9 +666,8 @@ func (d *deployer) Status(context.Context) (*status.Status, error) {
 	for _, group := range d.groups {
 		for component := range group.started {
 			c := &status.Component{
-				Name:  component,
-				Group: group.name,
-				Pids:  slices.Clone(group.pids),
+				Name: component,
+				Pids: slices.Clone(group.pids),
 			}
 			components = append(components, c)
 

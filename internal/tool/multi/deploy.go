@@ -19,21 +19,17 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
 	"github.com/ServiceWeaver/weaver/internal/status"
+	itool "github.com/ServiceWeaver/weaver/internal/tool"
 	"github.com/ServiceWeaver/weaver/internal/tool/config"
 	"github.com/ServiceWeaver/weaver/runtime"
 	"github.com/ServiceWeaver/weaver/runtime/bin"
 	"github.com/ServiceWeaver/weaver/runtime/codegen"
-	"github.com/ServiceWeaver/weaver/runtime/colors"
-	"github.com/ServiceWeaver/weaver/runtime/logging"
 	"github.com/ServiceWeaver/weaver/runtime/retry"
 	"github.com/ServiceWeaver/weaver/runtime/tool"
 	"github.com/ServiceWeaver/weaver/runtime/version"
@@ -101,6 +97,10 @@ func deploy(ctx context.Context, args []string) error {
 				binary = rel
 			}
 		}
+		selfVersion, err := itool.SelfVersion()
+		if err != nil {
+			return fmt.Errorf("read self version: %w", err)
+		}
 		return fmt.Errorf(`
 ERROR: The binary you're trying to deploy (%q) was built with
 github.com/ServiceWeaver/weaver module version %s. However, the 'weaver
@@ -115,19 +115,23 @@ updating the 'weaver multi' command by running the following.
 
 Then, re-build your code and re-run 'weaver multi deploy'. If the problem
 persists, please file an issue at https://github.com/ServiceWeaver/weaver/issues.`,
-			binary, versions.ModuleVersion, version.ModuleVersion)
+			binary, versions.ModuleVersion, selfVersion)
 	}
+
+	// Make temporary directory.
+	tmpDir, err := runtime.NewTempDir()
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+	runtime.OnExitSignal(func() { os.RemoveAll(tmpDir) })
 
 	// Create the deployer.
 	deploymentId := uuid.New().String()
-	d, err := newDeployer(ctx, deploymentId, multiConfig)
+	d, err := newDeployer(ctx, deploymentId, multiConfig, tmpDir)
 	if err != nil {
 		return fmt.Errorf("create deployer: %w", err)
 	}
-
-	// Start signal handler before listener
-	userDone := make(chan os.Signal, 1)
-	signal.Notify(userDone, syscall.SIGINT, syscall.SIGTERM)
 
 	// Run a status server.
 	lis, err := net.Listen("tcp", "localhost:0")
@@ -171,46 +175,11 @@ persists, please file an issue at https://github.com/ServiceWeaver/weaver/issues
 	if err := registry.Register(ctx, reg); err != nil {
 		return fmt.Errorf("register deployment: %w", err)
 	}
+	unregister := func() { registry.Unregister(ctx, deploymentId) }
+	defer unregister()
+	runtime.OnExitSignal(unregister)
 
-	deployerDone := make(chan error, 1)
-	go func() {
-		err := d.wait()
-		deployerDone <- err
-	}()
-	go func() {
-		var code = 1
-		// Wait for the user to kill the app or the app to return an error.
-		select {
-		case sig := <-userDone:
-			fmt.Fprintf(os.Stderr, "Application %s terminated by the user\n", appConfig.Name)
-			code = 128 + int(sig.(syscall.Signal))
-		case err := <-deployerDone:
-			fmt.Fprintf(os.Stderr, "Application %s error: %v\n", appConfig.Name, err)
-		}
-		if err := registry.Unregister(ctx, deploymentId); err != nil {
-			fmt.Fprintf(os.Stderr, "unregister deployment: %v\n", err)
-			code = 1
-		}
-		os.Exit(code)
-	}()
-
-	// Follow the logs.
-	source := logging.FileSource(logDir)
-	query := fmt.Sprintf(`full_version == %q && !("serviceweaver/system" in attrs)`, deploymentId)
-	r, err := source.Query(ctx, query, true)
-	if err != nil {
-		return err
-	}
-	pp := logging.NewPrettyPrinter(colors.Enabled())
-	for {
-		entry, err := r.Read(ctx)
-		if errors.Is(err, io.EOF) {
-			return nil
-		} else if err != nil {
-			return err
-		}
-		fmt.Println(pp.Format(entry))
-	}
+	return d.wait()
 }
 
 // defaultRegistry returns a registry in defaultRegistryDir().

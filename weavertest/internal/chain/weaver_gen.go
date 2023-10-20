@@ -13,26 +13,6 @@ import (
 	"reflect"
 )
 
-var _ codegen.LatestVersion = codegen.Version[[0][17]struct{}](`
-
-ERROR: You generated this file with 'weaver generate' v0.17.0 (codegen
-version v0.17.0). The generated code is incompatible with the version of the
-github.com/ServiceWeaver/weaver module that you're using. The weaver module
-version can be found in your go.mod file or by running the following command.
-
-    go list -m github.com/ServiceWeaver/weaver
-
-We recommend updating the weaver module and the 'weaver generate' command by
-running the following.
-
-    go get github.com/ServiceWeaver/weaver@latest
-    go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
-
-Then, re-run 'weaver generate' and re-build your code. If the problem persists,
-please file an issue at https://github.com/ServiceWeaver/weaver/issues.
-
-`)
-
 func init() {
 	codegen.Register(codegen.Registration{
 		Name:  "github.com/ServiceWeaver/weaver/weavertest/internal/chain/A",
@@ -46,6 +26,9 @@ func init() {
 		},
 		ServerStubFn: func(impl any, addLoad func(uint64, float64)) codegen.Server {
 			return a_server_stub{impl: impl.(A), addLoad: addLoad}
+		},
+		ReflectStubFn: func(caller func(string, context.Context, []any, []any) error) any {
+			return a_reflect_stub{caller: caller}
 		},
 		RefData: "⟦d3d93f6e:wEaVeReDgE:github.com/ServiceWeaver/weaver/weavertest/internal/chain/A→github.com/ServiceWeaver/weaver/weavertest/internal/chain/B⟧\n",
 	})
@@ -62,6 +45,9 @@ func init() {
 		ServerStubFn: func(impl any, addLoad func(uint64, float64)) codegen.Server {
 			return b_server_stub{impl: impl.(B), addLoad: addLoad}
 		},
+		ReflectStubFn: func(caller func(string, context.Context, []any, []any) error) any {
+			return b_reflect_stub{caller: caller}
+		},
 		RefData: "⟦08d612ad:wEaVeReDgE:github.com/ServiceWeaver/weaver/weavertest/internal/chain/B→github.com/ServiceWeaver/weaver/weavertest/internal/chain/C⟧\n",
 	})
 	codegen.Register(codegen.Registration{
@@ -76,6 +62,9 @@ func init() {
 		},
 		ServerStubFn: func(impl any, addLoad func(uint64, float64)) codegen.Server {
 			return c_server_stub{impl: impl.(C), addLoad: addLoad}
+		},
+		ReflectStubFn: func(caller func(string, context.Context, []any, []any) error) any {
+			return c_reflect_stub{caller: caller}
 		},
 		RefData: "",
 	})
@@ -371,6 +360,29 @@ func (s c_client_stub) Propagate(ctx context.Context, a0 int) (err error) {
 	return
 }
 
+// Note that "weaver generate" will always generate the error message below.
+// Everything is okay. The error message is only relevant if you see it when
+// you run "go build" or "go run".
+var _ codegen.LatestVersion = codegen.Version[[0][20]struct{}](`
+
+ERROR: You generated this file with 'weaver generate' (devel) (codegen
+version v0.20.0). The generated code is incompatible with the version of the
+github.com/ServiceWeaver/weaver module that you're using. The weaver module
+version can be found in your go.mod file or by running the following command.
+
+    go list -m github.com/ServiceWeaver/weaver
+
+We recommend updating the weaver module and the 'weaver generate' command by
+running the following.
+
+    go get github.com/ServiceWeaver/weaver@latest
+    go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
+
+Then, re-run 'weaver generate' and re-build your code. If the problem persists,
+please file an issue at https://github.com/ServiceWeaver/weaver/issues.
+
+`)
+
 // Server stub implementations.
 
 type a_server_stub struct {
@@ -497,4 +509,42 @@ func (s c_server_stub) propagate(ctx context.Context, args []byte) (res []byte, 
 	enc := codegen.NewEncoder()
 	enc.Error(appErr)
 	return enc.Data(), nil
+}
+
+// Reflect stub implementations.
+
+type a_reflect_stub struct {
+	caller func(string, context.Context, []any, []any) error
+}
+
+// Check that a_reflect_stub implements the A interface.
+var _ A = (*a_reflect_stub)(nil)
+
+func (s a_reflect_stub) Propagate(ctx context.Context, a0 int) (err error) {
+	err = s.caller("Propagate", ctx, []any{a0}, []any{})
+	return
+}
+
+type b_reflect_stub struct {
+	caller func(string, context.Context, []any, []any) error
+}
+
+// Check that b_reflect_stub implements the B interface.
+var _ B = (*b_reflect_stub)(nil)
+
+func (s b_reflect_stub) Propagate(ctx context.Context, a0 int) (err error) {
+	err = s.caller("Propagate", ctx, []any{a0}, []any{})
+	return
+}
+
+type c_reflect_stub struct {
+	caller func(string, context.Context, []any, []any) error
+}
+
+// Check that c_reflect_stub implements the C interface.
+var _ C = (*c_reflect_stub)(nil)
+
+func (s c_reflect_stub) Propagate(ctx context.Context, a0 int) (err error) {
+	err = s.caller("Propagate", ctx, []any{a0}, []any{})
+	return
 }

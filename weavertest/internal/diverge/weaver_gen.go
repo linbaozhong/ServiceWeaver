@@ -14,26 +14,6 @@ import (
 	"reflect"
 )
 
-var _ codegen.LatestVersion = codegen.Version[[0][17]struct{}](`
-
-ERROR: You generated this file with 'weaver generate' v0.17.0 (codegen
-version v0.17.0). The generated code is incompatible with the version of the
-github.com/ServiceWeaver/weaver module that you're using. The weaver module
-version can be found in your go.mod file or by running the following command.
-
-    go list -m github.com/ServiceWeaver/weaver
-
-We recommend updating the weaver module and the 'weaver generate' command by
-running the following.
-
-    go get github.com/ServiceWeaver/weaver@latest
-    go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
-
-Then, re-run 'weaver generate' and re-build your code. If the problem persists,
-please file an issue at https://github.com/ServiceWeaver/weaver/issues.
-
-`)
-
 func init() {
 	codegen.Register(codegen.Registration{
 		Name:  "github.com/ServiceWeaver/weaver/weavertest/internal/diverge/Errer",
@@ -47,6 +27,9 @@ func init() {
 		},
 		ServerStubFn: func(impl any, addLoad func(uint64, float64)) codegen.Server {
 			return errer_server_stub{impl: impl.(Errer), addLoad: addLoad}
+		},
+		ReflectStubFn: func(caller func(string, context.Context, []any, []any) error) any {
+			return errer_reflect_stub{caller: caller}
 		},
 		RefData: "",
 	})
@@ -62,6 +45,9 @@ func init() {
 		},
 		ServerStubFn: func(impl any, addLoad func(uint64, float64)) codegen.Server {
 			return pointer_server_stub{impl: impl.(Pointer), addLoad: addLoad}
+		},
+		ReflectStubFn: func(caller func(string, context.Context, []any, []any) error) any {
+			return pointer_reflect_stub{caller: caller}
 		},
 		RefData: "",
 	})
@@ -255,6 +241,29 @@ func (s pointer_client_stub) Get(ctx context.Context) (r0 Pair, err error) {
 	return
 }
 
+// Note that "weaver generate" will always generate the error message below.
+// Everything is okay. The error message is only relevant if you see it when
+// you run "go build" or "go run".
+var _ codegen.LatestVersion = codegen.Version[[0][20]struct{}](`
+
+ERROR: You generated this file with 'weaver generate' (devel) (codegen
+version v0.20.0). The generated code is incompatible with the version of the
+github.com/ServiceWeaver/weaver module that you're using. The weaver module
+version can be found in your go.mod file or by running the following command.
+
+    go list -m github.com/ServiceWeaver/weaver
+
+We recommend updating the weaver module and the 'weaver generate' command by
+running the following.
+
+    go get github.com/ServiceWeaver/weaver@latest
+    go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
+
+Then, re-run 'weaver generate' and re-build your code. If the problem persists,
+please file an issue at https://github.com/ServiceWeaver/weaver/issues.
+
+`)
+
 // Server stub implementations.
 
 type errer_server_stub struct {
@@ -335,6 +344,32 @@ func (s pointer_server_stub) get(ctx context.Context, args []byte) (res []byte, 
 	(r0).WeaverMarshal(enc)
 	enc.Error(appErr)
 	return enc.Data(), nil
+}
+
+// Reflect stub implementations.
+
+type errer_reflect_stub struct {
+	caller func(string, context.Context, []any, []any) error
+}
+
+// Check that errer_reflect_stub implements the Errer interface.
+var _ Errer = (*errer_reflect_stub)(nil)
+
+func (s errer_reflect_stub) Err(ctx context.Context, a0 int) (err error) {
+	err = s.caller("Err", ctx, []any{a0}, []any{})
+	return
+}
+
+type pointer_reflect_stub struct {
+	caller func(string, context.Context, []any, []any) error
+}
+
+// Check that pointer_reflect_stub implements the Pointer interface.
+var _ Pointer = (*pointer_reflect_stub)(nil)
+
+func (s pointer_reflect_stub) Get(ctx context.Context) (r0 Pair, err error) {
+	err = s.caller("Get", ctx, []any{}, []any{&r0})
+	return
 }
 
 // AutoMarshal implementations.

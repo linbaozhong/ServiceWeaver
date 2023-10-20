@@ -23,14 +23,12 @@ import (
 	"time"
 
 	"github.com/ServiceWeaver/weaver/runtime/colors"
-	"github.com/ServiceWeaver/weaver/runtime/protomsg"
 	"github.com/ServiceWeaver/weaver/runtime/protos"
 )
 
 var (
-	dimColor      = colors.Color256(245) // dimmed text color (a light gray)
-	errorColor    = colors.Color256(9)   // error color (a light red)
-	attrNameColor = colors.Color256(141) // attribute name color (a light purple))
+	dimColor   = colors.Color256(245) // dimmed text color (a light gray)
+	errorColor = colors.Color256(9)   // error color (a light red)
 )
 
 // PrettyPrinter pretty prints log entries. You can safely use a PrettyPrinter
@@ -38,11 +36,12 @@ var (
 type PrettyPrinter struct {
 	colorize func(colors.Code, string) string // colors the provided string
 
-	mu               sync.Mutex       // guards the following fields
-	b                strings.Builder  // used to format entries
-	prev             *protos.LogEntry // previously printed entry
-	componentPadding int              // component padding
-	sourcePadding    int              // file:line padding
+	mu               sync.Mutex      // guards the following fields
+	b                strings.Builder // used to format entries
+	prevTime         time.Time       // Last line timestamp
+	componentPadding int             // component padding
+	sourcePadding    int             // file:line padding
+	attrs            [][2]string     // Temporary storage
 }
 
 // NewPrettyPrinter returns a new PrettyPrinter. If color is true, the pretty
@@ -50,8 +49,8 @@ type PrettyPrinter struct {
 func NewPrettyPrinter(color bool) *PrettyPrinter {
 	pp := &PrettyPrinter{
 		colorize:         func(_ colors.Code, s string) string { return s },
-		componentPadding: 7,
-		sourcePadding:    10,
+		componentPadding: 20,
+		sourcePadding:    20,
 	}
 	if color {
 		pp.colorize = func(code colors.Code, s string) string {
@@ -64,13 +63,13 @@ func NewPrettyPrinter(color bool) *PrettyPrinter {
 // Format formats a log entry as a single line of human-readable text. Here are
 // some examples of what pretty printed log entries look like:
 //
-//	I0921 10:07:31.733831 distributor 076cb5f1 distributor.go:164] Registering versions...
-//	I0921 10:07:31.759352 distributor 076cb5f1 anneal.go:155     ] Deploying versions...
-//	I0921 10:07:31.759696 manager     076cb5f1 manager.go:125    ] Starting versions...
-//	I0921 10:07:31.836563 manager     076cb5f1 manager.go:137    ] Success starting...
-//	I0921 10:07:31.849647 distributor 076cb5f1 anneal.go:184     ] Successfully deployed...
-//	I0921 10:07:31.862637 distributor 076cb5f1 distributor.go:169] Successfully registered...
-//	I0921 10:07:31.862754 controller  076cb5f1 anneal.go:331     ] Successfully distributed...
+//	I0921 10:07:31.733831 distributor 076cb5f1 distributor.go:164 │ Registering versions...
+//	I0921 10:07:31.759352 distributor 076cb5f1 anneal.go:155      │ Deploying versions...
+//	I0921 10:07:31.759696 manager     076cb5f1 manager.go:125     │ Starting versions...
+//	I0921 10:07:31.836563 manager     076cb5f1 manager.go:137     │ Success starting...
+//	I0921 10:07:31.849647 distributor 076cb5f1 anneal.go:184      │ Successfully deployed...
+//	I0921 10:07:31.862637 distributor 076cb5f1 distributor.go:169 │ Successfully registered...
+//	I0921 10:07:31.862754 controller  076cb5f1 anneal.go:331      │ Successfully distributed...
 func (pp *PrettyPrinter) Format(e *protos.LogEntry) string {
 	// We want to pretty print the log entry, preferring prettiness over
 	// completeness. We lose some information (e.g., the full filename, the
@@ -79,13 +78,6 @@ func (pp *PrettyPrinter) Format(e *protos.LogEntry) string {
 	pp.mu.Lock()
 	defer pp.mu.Unlock()
 	pp.b.Reset()
-
-	// Compute some diffs for dimming.
-	sameComponent := pp.prev != nil && e.Component == pp.prev.Component
-	sameNode := pp.prev != nil && e.Node == pp.prev.Node
-	sameLevel := pp.prev != nil && e.Level == pp.prev.Level
-	sameFile := pp.prev != nil && e.File == pp.prev.File
-	sameLine := pp.prev != nil && e.Line == pp.prev.Line
 
 	// Write the abbreviated level and time. If the level is "error", we color
 	// the level and time. Otherwise, we don't.
@@ -97,38 +89,14 @@ func (pp *PrettyPrinter) Format(e *protos.LogEntry) string {
 	if strings.ToLower(e.Level) == "error" {
 		levelColor = errorColor
 	}
+	pp.b.WriteString(pp.colorize(levelColor, level))
 
 	cur := time.UnixMicro(e.TimeMicros)
-	if !sameComponent || !sameNode || !sameLevel || pp.prev == nil {
-		// If we have a different component, node, or level, we don't dim the
-		// level and time. If we did, then things like the day and year would
-		// almost always be dimmed.
-		pp.b.WriteString(pp.colorize(levelColor, level))
+	if cur.Unix() != pp.prevTime.Unix() {
 		pp.b.WriteString(pp.colorize(levelColor, cur.Format("0102 15:04:05.000000")))
 	} else {
-		pp.b.WriteString(pp.colorize(dimColor, level))
-		prevTime := time.UnixMicro(pp.prev.TimeMicros)
-		switch {
-		case cur.Month() != prevTime.Month():
-			pp.b.WriteString(pp.colorize(levelColor, cur.Format("0102 15:04:05.000000")))
-		case cur.Day() != prevTime.Day():
-			pp.b.WriteString(pp.colorize(dimColor, cur.Format("01")))
-			pp.b.WriteString(pp.colorize(levelColor, cur.Format("02 15:04:05.000000")))
-		case cur.Hour() != prevTime.Hour():
-			pp.b.WriteString(pp.colorize(dimColor, cur.Format("0102")))
-			pp.b.WriteString(pp.colorize(levelColor, cur.Format("15:04:05.000000")))
-		case cur.Minute() != prevTime.Minute():
-			pp.b.WriteString(pp.colorize(dimColor, cur.Format("0102 15:")))
-			pp.b.WriteString(pp.colorize(levelColor, cur.Format("04:05.000000")))
-		case cur.Second() != prevTime.Second():
-			pp.b.WriteString(pp.colorize(dimColor, cur.Format("0102 15:04:")))
-			pp.b.WriteString(pp.colorize(levelColor, cur.Format("05.000000")))
-		case cur.Nanosecond()/1000 != prevTime.Nanosecond()/1000:
-			pp.b.WriteString(pp.colorize(dimColor, cur.Format("0102 15:04:05.")))
-			pp.b.WriteString(pp.colorize(levelColor, fmt.Sprintf("%06d", cur.Nanosecond()/1000)))
-		default:
-			pp.b.WriteString(pp.colorize(dimColor, cur.Format("0102 15:04:05.000000")))
-		}
+		pp.b.WriteString(pp.colorize(dimColor, cur.Format("0102 15:04:05.")))
+		pp.b.WriteString(pp.colorize(levelColor, fmt.Sprintf("%06d", cur.Nanosecond()/1000)))
 	}
 	pp.b.WriteByte(' ')
 
@@ -142,11 +110,7 @@ func (pp *PrettyPrinter) Format(e *protos.LogEntry) string {
 	// Write the node.
 	if len(e.Node) > 0 {
 		pp.b.WriteByte(' ')
-		if sameNode {
-			pp.b.WriteString(pp.colorize(dimColor, Shorten(e.Node)))
-		} else {
-			pp.b.WriteString(pp.colorize(colors.ColorHash(e.Node), Shorten(e.Node)))
-		}
+		pp.b.WriteString(pp.colorize(colors.ColorHash(e.Node), Shorten(e.Node)))
 	}
 
 	// Write the file and line, if present.
@@ -158,46 +122,56 @@ func (pp *PrettyPrinter) Format(e *protos.LogEntry) string {
 			pp.sourcePadding = len(s)
 		}
 
-		if sameFile && sameLine {
-			s := fmt.Sprintf("%s:%s", file, line)
-			pp.b.WriteString(pp.colorize(dimColor, fmt.Sprintf("%*s", -pp.sourcePadding, s)))
-		} else if sameFile && !sameLine {
-			s := pp.colorize(dimColor, fmt.Sprintf("%s:", file)) + line
-			fmt.Fprintf(&pp.b, "%*s", -pp.sourcePadding-len(dimColor)-len(colors.Reset), s)
-		} else {
-			s := fmt.Sprintf("%s:%s", file, line)
-			fmt.Fprintf(&pp.b, "%*s", -pp.sourcePadding, s)
-		}
+		s := fmt.Sprintf("%s:%s", file, line)
+		color := colors.ColorHash(file)
+		pp.b.WriteString(fmt.Sprintf("%*s", -pp.sourcePadding-len(color)-len(colors.Reset), pp.colorize(color, s)))
 	} else {
 		fmt.Fprintf(&pp.b, "%*s", -pp.sourcePadding, "")
 	}
 
 	// Write the message.
-	pp.b.WriteString("] ")
-	pp.b.WriteString(pp.colorize(levelColor, e.Msg))
+	pp.b.WriteString(pp.colorize(dimColor, " │ "))
+	pp.b.WriteString(e.Msg)
 
 	// Write the attributes, if present.
-	if len(e.Attrs) > 0 {
-		// Sort the attributes.
-		type attr struct{ name, value string }
-		attrs := make([]attr, 0, len(e.Attrs)/2)
-		for i := 0; i+1 < len(e.Attrs); i += 2 {
-			name, value := e.Attrs[i], e.Attrs[i+1]
-			attrs = append(attrs, attr{name, value})
+	for _, attr := range pp.sortedAttributes(e) {
+		// Pick attribute color
+		var color colors.Code
+		if attr[0] == "component" {
+			// Stay consistent with color used in component column.
+			color = colors.ColorHash(attr[1])
+		} else if attr[0] == "err" {
+			color = errorColor // Errors have a fixed color
+		} else {
+			// Assign same color to everything with the same key
+			color = colors.ColorHash(attr[0])
 		}
-		sort.Slice(attrs, func(i, j int) bool {
-			return attrs[i].name < attrs[j].name
-		})
-
-		for _, attr := range attrs {
-			pp.b.WriteString(" ")
-			pp.b.WriteString(pp.colorize(attrNameColor, attr.name))
-			fmt.Fprintf(&pp.b, "=%q", attr.value)
-		}
+		pp.b.WriteString(" ")
+		pp.b.WriteString(pp.colorize(dimColor, attr[0]+"="))
+		pp.b.WriteString(pp.colorize(color, fmt.Sprintf("%q", attr[1])))
 	}
 
-	pp.prev = protomsg.Clone(e)
+	pp.prevTime = cur
 	return pp.b.String()
+}
+
+func (pp *PrettyPrinter) sortedAttributes(e *protos.LogEntry) [][2]string {
+	attrs := pp.attrs[:0]
+
+	// Get attributes and sort.
+	for i := 0; i+1 < len(e.Attrs); i += 2 {
+		name, value := e.Attrs[i], e.Attrs[i+1]
+		if name == "serviceweaver/system" {
+			continue // Aleady implied by component name
+		}
+		attrs = append(attrs, [2]string{name, value})
+	}
+	sort.Slice(attrs, func(i, j int) bool {
+		return attrs[i][0] < attrs[j][0]
+	})
+
+	pp.attrs = attrs // So we reuse allocated space next time
+	return attrs
 }
 
 // Shorten returns a short prefix of the provided string.

@@ -52,6 +52,12 @@ type Destination interface {
 	RoutedRecord(_ context.Context, file, msg string) error
 }
 
+var (
+	_ weaver.NotRetriable = Source.Emit
+	_ weaver.NotRetriable = Destination.Record
+	_ weaver.NotRetriable = Destination.RoutedRecord
+)
+
 type destRouter struct{}
 
 func (r destRouter) RoutedRecord(_ context.Context, file, msg string) string {
@@ -66,12 +72,18 @@ type destination struct {
 
 var pid = os.Getpid()
 
+func (d *destination) Init(ctx context.Context) error {
+	d.Logger(ctx).Info("init")
+	return nil
+}
+
 func (d *destination) Getpid(_ context.Context) (int, error) {
 	return pid, nil
 }
 
 // Record adds a message.
-func (d *destination) Record(_ context.Context, file, msg string) error {
+func (d *destination) Record(ctx context.Context, file, msg string) error {
+	d.Logger(ctx).Info("record", "msg", msg)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -122,7 +134,6 @@ type server struct {
 }
 
 func (s *server) Init(ctx context.Context) error {
-	//nolint:nolintlint,typecheck // golangci-lint false positive on Go tip
 	s.addr = s.hello.String()
 	s.proxy = s.hello.ProxyAddr()
 

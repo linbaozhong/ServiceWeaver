@@ -19,6 +19,7 @@ package envelope
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -127,42 +128,55 @@ func NewEnvelope(ctx context.Context, wlet *protos.EnvelopeInfo, config *protos.
 	// Form the weavelet command.
 	cmd := pipe.CommandContext(e.ctx, e.config.Binary, e.config.Args...)
 
-	// Create the pipes first, so we can fill cmd.Env and detect any errors early.
-	//
-	// Pipe for messages to weavelet.
-	toWeaveletFd, toWeavelet, err := cmd.WPipe()
+	// Create the request/response pipes first, so we can fill cmd.Env and detect any errors early.
+	pipePair, err := cmd.MakePipePair()
 	if err != nil {
-		return nil, fmt.Errorf("cannot create weavelet request pipe: %w", err)
-	}
-	// Pipe for messages to envelope.
-	toEnvelopeFd, toEnvelope, err := cmd.RPipe()
-	if err != nil {
-		return nil, fmt.Errorf("cannot create weavelet response pipe: %w", err)
+		return nil, fmt.Errorf("NewEnvelope: create weavelet request/response pipes: %w", err)
 	}
 
 	// Create pipes that capture child outputs.
 	outpipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("create stdout pipe: %w", err)
+		return nil, fmt.Errorf("NewEnvelope: create stdout pipe: %w", err)
 	}
 	errpipe, err := cmd.StderrPipe()
 	if err != nil {
-		return nil, fmt.Errorf("create stderr pipe: %w", err)
+		return nil, fmt.Errorf("NewEnvelope: create stderr pipe: %w", err)
 	}
 
+	// Create pair of pipes to use for component method calls from weavelet to envelope.
+
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", runtime.ToWeaveletKey, strconv.FormatUint(uint64(toWeaveletFd), 10)))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", runtime.ToEnvelopeKey, strconv.FormatUint(uint64(toEnvelopeFd), 10)))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", runtime.ToWeaveletKey, strconv.FormatUint(uint64(pipePair.ChildReader), 10)))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", runtime.ToEnvelopeKey, strconv.FormatUint(uint64(pipePair.ChildWriter), 10)))
 	cmd.Env = append(cmd.Env, e.config.Env...)
 
 	// Start the command.
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewEnvelope: start subprocess: %w", err)
 	}
 
 	// Create the connection, now that the weavelet is running.
-	conn, err := conn.NewEnvelopeConn(e.ctx, toEnvelope, toWeavelet, e.weavelet)
+	conn, err := conn.NewEnvelopeConn(e.ctx, pipePair.ParentReader, pipePair.ParentWriter, e.weavelet)
 	if err != nil {
+		err := fmt.Errorf("NewEnvelope: connect to weavelet: %w", err)
+
+		// Kill the subprocess, if it's not already dead.
+		cancel()
+
+		// Include stdout and stderr in the returned error.
+		if bytes, stdoutErr := io.ReadAll(outpipe); stdoutErr == nil && len(bytes) > 0 {
+			err = errors.Join(err, fmt.Errorf("-----BEGIN STDOUT-----\n%s-----END STDOUT-----", string(bytes)))
+		}
+		if bytes, stderrErr := io.ReadAll(errpipe); stderrErr == nil && len(bytes) > 0 {
+			err = errors.Join(err, fmt.Errorf("-----BEGIN STDERR-----\n%s\n-----END STDERR-----", string(bytes)))
+		}
+
+		// Wait for the subprocess to terminate.
+		if waitErr := cmd.Wait(); waitErr != nil {
+			err = errors.Join(err, waitErr)
+		}
+		cmd.Cleanup()
 		return nil, err
 	}
 
@@ -217,7 +231,7 @@ func (e *Envelope) Serve(h EnvelopeHandler) error {
 		return err
 	})
 
-	running.Wait() //nolint:errcheck // supplanted by stopErr
+	running.Wait()
 
 	// Wait for the weavelet command to finish. This needs to be done after
 	// we're done reading from stdout/stderr pipes, per comments on
@@ -241,6 +255,11 @@ func (e *Envelope) toggleProfiling(expected bool) bool {
 	}
 	e.profiling = !e.profiling
 	return true
+}
+
+// Pid returns the process id of the subprocess.
+func (e *Envelope) Pid() int {
+	return e.cmd.Process.Pid
 }
 
 // WeaveletInfo returns information about the started weavelet.

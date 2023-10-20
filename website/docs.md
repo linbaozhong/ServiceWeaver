@@ -44,7 +44,7 @@ section for a tutorial on how to write Service Weaver applications.
 
 # Installation
 
-Ensure you have [Go installed][go_install], version 1.20 or higher. Then, run
+Ensure you have [Go installed][go_install], version 1.21 or higher. Then, run
 the following to install the `weaver` command:
 
 确保你已经 [Go installed][go_install]，版本1.20或更高。然后，执行如下命令安装weaver命令:
@@ -54,14 +54,14 @@ $ go install github.com/ServiceWeaver/weaver/cmd/weaver@latest
 ```
 
 `go install` installs the `weaver` command to `$GOBIN`, which defaults to
-`$GOPATH/bin`. Make sure this directory is included in your `PATH`. You can
+`$HOME/go/bin`. Make sure this directory is included in your `PATH`. You can
 accomplish this, for example, by adding the following to your `.bashrc` and
 running `source ~/.bashrc`:
 
 `go install` 将`weaver`命令安装到`$GOBIN`中，默认为`$GOPATH/bin`。确保这个目录包含在您的`PATH`中。你可以做到这一点，例如，通过在你的`.bashrc`中添加以下代码并运行`source ~/.bashrc`:
 
 ```console
-$ export PATH="$PATH:$GOPATH/bin"
+$ export PATH="$PATH:$HOME/go/bin"
 ```
 
 If the installation was successful, you should be able to run `weaver --help`:
@@ -128,7 +128,7 @@ $ cd hello/
 $ go mod init hello
 ```
 
-Then, create a file called `hello.go` with the following contents:
+Then, create a file called `main.go` with the following contents:
 
 然后，创建一个名为 `hello.go` 的文件。内容如下:
 
@@ -370,8 +370,8 @@ Here's an explanation of the code:
 
 By default, all application listeners listen on a random port chosen by the
 operating system. Here, we want to change this default behavior and assign a
-fixed local listener port for the `hello` listener. To do so,
-we create a [TOML](https://toml.io) config file named `weaver.toml` with
+fixed local listener port for the `hello` listener. To do so, create a
+[TOML](https://toml.io) config file named `weaver.toml` with
 the following contents:
 
 ```toml
@@ -391,13 +391,19 @@ type app struct {
 }
 ```
 
-Run `go mod tidy` and then `SERVICEWEAVER_CONFIG=weaver.toml go run .`.
+Listener names must be valid [Go identifiers][identifiers]. For example, the
+names `"foo"`, `"bar42"`, and `"_moo"` are legal, while `""`, `"foo bar"`, and
+`"foo-bar"` are illegal.
+
+Run `weaver generate`, then `go mod tidy`, and then
+`SERVICEWEAVER_CONFIG=weaver.toml go run .`.
 The program should print out the name of the application and a unique
 deployment id. It should then block serving HTTP requests on `localhost:12345`.
 
 运行 `go mod tidy` ，然后 `go run .`。程序应该打印出应用程序的名称和唯一的部署id。然后，它应该阻塞在`localhost:12345`上提供HTTP请求。
 
 ```console
+$ weaver generate
 $ go mod tidy
 $ go run .
 ╭───────────────────────────────────────────────────╮
@@ -718,13 +724,14 @@ func (f *foo) Init(context.Context) error {
 
 ## Semantics
 
-When implementing a component, there are three semantic details to keep in mind:
+When implementing a component, there are a few semantic details to keep in mind:
 
 在实现组件时，需要记住三个语义细节:
 
 1.  A component's state is not persisted.
 2.  A component's methods may be invoked concurrently.
 3.  There may be multiple replicas of a component.
+4.  Component methods may be retried automatically by default.
 
 
 1. 组件的状态不会被持久化。
@@ -800,10 +807,30 @@ if errors.Is(err, weaver.RemoteCallError) {
 
 Note that if a method call returns an error with an embedded
 `weaver.RemoteCallError`, it does *not* mean that the method never executed. The
-method may have executed partially or fully. Thus, you must be careful retrying
-method calls that result in a `weaver.RemoteCallError`. Ensuring that all
-methods are either read-only or idempotent is one way to ensure safe retries,
-for example. Service Weaver does not automatically retry method calls that fail.
+method may have executed partially, or fully, or multiple times due to automatic
+retries.
+
+On network errors, a component method call may be retried automatically by
+Service Weaver. This may cause a single method call to turn into multiple
+executions of that method. In practice, many methods (e.g., read-only or
+idempotent methods) work correctly even when executed more than once per call,
+and this automatic retrying can help make the application more robust in the
+presence of failures.
+
+However some methods should not be retried automatically. E.g., if our cache was
+extended with a method that appends a string to a cached value, automatic
+retrying could cause multiple copies of the argument to be appended to the
+cached value. Such methods can be specially marked to prevent automatic retries.
+
+```go
+type Cache interface{
+    ...
+    Append(context.Context, key, val string) error
+}
+
+// Do not retry Cache.Append.
+var _ weaver.NotRetriable = Cache.Append
+```
 
 ## Listeners
 
@@ -1006,9 +1033,9 @@ type adder struct {
     weaver.Implements[Adder]
 }
 
-func (a *adder) Add(_ context.Context, x, y int) (int, error) {
+func (a *adder) Add(ctx context.Context, x, y int) (int, error) {
     // adder embeds weaver.Implements[Adder] which provides the Logger method.
-    logger := a.Logger()
+    logger := a.Logger(ctx)
     logger.Debug("A debug log.")
     logger.Info("An info log.")
     logger.Error("An error log.", fmt.Errorf("an error"))
@@ -1021,9 +1048,9 @@ Logs look like this:
 日志像这样的:
 
 ```console
-D1103 08:55:15.650138 main.Adder 73ddcd04 adder.go:12] A debug log.
-I1103 08:55:15.650149 main.Adder 73ddcd04 adder.go:13] An info log.
-E1103 08:55:15.650158 main.Adder 73ddcd04 adder.go:14] An error log. err="an error"
+D1103 08:55:15.650138 main.Adder 73ddcd04 adder.go:12 │ A debug log.
+I1103 08:55:15.650149 main.Adder 73ddcd04 adder.go:13 │ An info log.
+E1103 08:55:15.650158 main.Adder 73ddcd04 adder.go:14 │ An error log. err="an error"
 ```
 
 The first character of a log line indicates whether the log is a [D]ebug,
@@ -2598,7 +2625,7 @@ listeners.hat = {public_hostname = "hat.gg"}
 | regions | optional | Regions in which the Service Weaver application should be deployed. Defaults to `["us-west1"]`. |
 | listeners | optional | The application's listener options, e.g., the listeners' public hostnames. |
 
-# Local GKE
+## Local GKE
 
 [`weaver gke`](#gke) lets you deploy Service Weaver applications to GKE. `weaver gke-local`
 is a drop-in replacement for `weaver gke` that allows you to simulate GKE
@@ -2611,7 +2638,7 @@ also uses [the same config as a `weaver gke`](#gke-config), meaning that after y
 test your application locally using `weaver gke-local`, you can deploy the same
 application to GKE without any code *or* config changes.
 
-## Installation
+### Installation
 
 First, [ensure you have Service Weaver installed](#installation). Next, install
 the `weaver-gke-local` command:
@@ -2620,7 +2647,7 @@ the `weaver-gke-local` command:
 $ go install github.com/ServiceWeaver/weaver-gke/cmd/weaver-gke-local@latest
 ```
 
-## Getting Started
+### Getting Started
 
 In the [`weaver gke`](#gke-getting-started) section, we deployed a "Hello,
 World!" application to GKE using `weaver gke deploy`. We can deploy the same app
@@ -2713,7 +2740,7 @@ TODO(mwhittaker): Have `weaver gke-local` print instructions on how to curl the
 proxy.
 </div>
 
-## Logging
+### Logging
 
 `weaver gke-local deploy` logs to stdout. It additionally persists all log
 entries in a set of files in `/tmp/serviceweaver/logs/weaver-gke-local`. Every file
@@ -2757,7 +2784,7 @@ weaver gke-local logs --system
 Refer to `weaver gke-local logs --help` for a full explanation of the query
 language, along with many more examples.
 
-## Metrics
+### Metrics
 
 In addition to running the proxy on port 8000 (see the [Getting
 Started](#local-gke-getting-started)), `weaver gke-local` also runs a status
@@ -2785,7 +2812,7 @@ scrape_configs:
     - targets: ['localhost:8001']
 ```
 
-## Profiling
+### Profiling
 
 Use the `weaver gke-local profile` command to collect a profile of your Service Weaver
 application. Invoke the command with the name (and optionally version) of the
@@ -2816,7 +2843,7 @@ $ go tool pprof -http=localhost:9000 $profile # Visualize the profile.
 
 Refer to `weaver gke-local profile --help` for more details.
 
-## Tracing
+### Tracing
 
 Run `weaver gke-local dashboard` to open a dashboard in a web browser. The
 dashboard has a page for every Service Weaver application deployed via
@@ -2829,7 +2856,7 @@ example of what the tracing page looks like:
 Refer to [Perfetto UI Docs](https://perfetto.dev/docs/visualization/perfetto-ui)
 to learn more about how to use the tracing UI.
 
-## Versioning
+### Versioning
 
 Recall that `weaver gke` performs slow rollouts
 [across regions](#gke-multi-region) and
@@ -3130,6 +3157,7 @@ runtime benefits of microservices.
 [go_interfaces]: https://go.dev/tour/methods/9
 [hello_app]: https://github.com/ServiceWeaver/weaver/tree/main/examples/hello
 [http_pprof]: https://pkg.go.dev/net/http/pprof
+[identifiers]: https://go.dev/ref/spec#Identifiers
 [isolation]: https://sre.google/workbook/canarying-releases/#dependencies-and-isolation
 [kubernetes]: https://kubernetes.io/
 [logs_explorer]: https://cloud.google.com/logging/docs/view/logs-explorer-interface

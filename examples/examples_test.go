@@ -34,6 +34,13 @@ type test struct {
 }
 
 func TestExamples(t *testing.T) {
+	// Build the weaver binary.
+	cmd := exec.Command("go", "build")
+	cmd.Dir = "../cmd/weaver"
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+
 	testCases := map[string]test{
 		// TODO(mwhittaker): Add helloworld example.
 		"hello": {
@@ -51,10 +58,6 @@ func TestExamples(t *testing.T) {
 		"factors": {
 			url:  "http://127.0.0.1:9000?x=10",
 			want: "[1 2 5 10]",
-		},
-		"onlineboutique": {
-			url:  "http://127.0.0.1:12345",
-			want: "Online Boutique",
 		},
 	}
 

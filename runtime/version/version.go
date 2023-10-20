@@ -24,19 +24,6 @@ import (
 // Srdjan's comments in PR #219.
 
 const (
-	// The weaver module semantic version [1].
-	//
-	// [1]: https://go.dev/doc/modules/version-numbers
-	ModuleMajor = 0
-	ModuleMinor = 17
-	ModulePatch = 0
-
-	// Note that there is currently no way to programmatically get the version
-	// of the current module [1], so we have to manually update the module
-	// version here whenever we release a new version.
-	//
-	// [1]: https://github.com/golang/go/issues/29228
-
 	// The version of the deployer API.
 	//
 	// Every time we make a change to the deployer API, we assign it a new
@@ -50,19 +37,16 @@ const (
 	// the deployer API in v0.13.0 of Service Weaver, then we leave the
 	// deployer API at v0.12.0.
 	DeployerMajor = 0
-	DeployerMinor = 18
+	DeployerMinor = 22
 
 	// The version of the codegen API. As with the deployer API, we assign a
 	// new version every time we change how code is generated, and we use
 	// weaver module versions.
 	CodegenMajor = 0
-	CodegenMinor = 17
+	CodegenMinor = 20
 )
 
 var (
-	// The weaver module version.
-	ModuleVersion = SemVer{ModuleMajor, ModuleMinor, ModulePatch}
-
 	// The deployer API version.
 	DeployerVersion = SemVer{DeployerMajor, DeployerMinor, 0}
 

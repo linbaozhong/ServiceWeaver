@@ -16,10 +16,10 @@ package conn
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"runtime/pprof"
 	"time"
 
@@ -86,7 +86,7 @@ func NewWeaveletConn(r io.ReadCloser, w io.WriteCloser) (*WeaveletConn, error) {
 	}
 
 	// Second, send WeaveletInfo.
-	lis, err := listen(wc.einfo)
+	lis, err := net.Listen("tcp", wc.einfo.InternalAddress)
 	if err != nil {
 		wc.conn.cleanup(err)
 		return nil, err
@@ -98,7 +98,6 @@ func NewWeaveletConn(r io.ReadCloser, w io.WriteCloser) (*WeaveletConn, error) {
 	}
 	wc.winfo = &protos.WeaveletInfo{
 		DialAddr: dialAddr,
-		Pid:      int64(os.Getpid()),
 		Version: &protos.SemVer{
 			Major: version.DeployerMajor,
 			Minor: version.DeployerMinor,
@@ -113,9 +112,14 @@ func NewWeaveletConn(r io.ReadCloser, w io.WriteCloser) (*WeaveletConn, error) {
 
 // Serve accepts RPC requests from the envelope. Requests are handled serially
 // in the order they are received.
-func (w *WeaveletConn) Serve(h WeaveletHandler) error {
+func (w *WeaveletConn) Serve(ctx context.Context, h WeaveletHandler) error {
+	go func() {
+		<-ctx.Done()
+		w.conn.cleanup(ctx.Err())
+	}()
+
 	msg := &protos.EnvelopeMsg{}
-	for {
+	for ctx.Err() == nil {
 		if err := w.conn.recv(msg); err != nil {
 			return err
 		}
@@ -123,6 +127,7 @@ func (w *WeaveletConn) Serve(h WeaveletHandler) error {
 			return err
 		}
 	}
+	return ctx.Err()
 }
 
 // EnvelopeInfo returns the EnvelopeInfo received from the envelope.
@@ -187,7 +192,6 @@ func (w *WeaveletConn) handleMessage(handler WeaveletHandler, msg *protos.Envelo
 		go func() {
 			data, err := Profile(req)
 			// Reply with profile data.
-			//nolint:errcheck //errMsg will be returned on next send
 			w.conn.send(&protos.WeaveletMsg{
 				Id:              -id,
 				Error:           errstring(err),
@@ -344,21 +348,4 @@ func Profile(req *protos.GetProfileRequest) ([]byte, error) {
 		return nil, fmt.Errorf("unspecified profile collection type")
 	}
 	return buf.Bytes(), nil
-}
-
-func listen(info *protos.EnvelopeInfo) (net.Listener, error) {
-	// Pick a hostname to listen on.
-	host := "localhost"
-	if !info.SingleMachine {
-		// TODO(mwhittaker): Right now, we resolve our hostname to get a
-		// dialable IP address. Double check that this always works.
-		var err error
-		host, err = os.Hostname()
-		if err != nil {
-			return nil, fmt.Errorf("error getting local hostname: %w", err)
-		}
-	}
-
-	// Create the listener
-	return net.Listen("tcp", fmt.Sprintf("%s:%d", host, info.InternalPort))
 }

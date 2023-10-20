@@ -31,7 +31,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// The default number of times a component is replicated.
+// DefaultReplication is the default number of times a component is replicated.
 //
 // TODO(mwhittaker): Include this in the Options struct?
 const DefaultReplication = 2
@@ -157,12 +157,11 @@ func (d *deployer) start() (runtime.Bootstrap, error) {
 	}
 	// Run an envelope connection to the main co-location group.
 	wlet := &protos.EnvelopeInfo{
-		App:           d.wlet.App,
-		DeploymentId:  d.wlet.DeploymentId,
-		Id:            uuid.New().String(),
-		Sections:      d.wlet.Sections,
-		SingleProcess: d.wlet.SingleProcess,
-		SingleMachine: d.wlet.SingleMachine,
+		App:             d.wlet.App,
+		DeploymentId:    d.wlet.DeploymentId,
+		Id:              uuid.New().String(),
+		Sections:        d.wlet.Sections,
+		InternalAddress: "localhost:0",
 	}
 	bootstrap := runtime.Bootstrap{
 		ToWeaveletFile: toWeaveletReader,
@@ -221,7 +220,7 @@ func (d *deployer) stopLocked(err error) {
 // cleanup cleans up all of the running envelopes' state.
 func (d *deployer) cleanup() error {
 	d.ctxCancel()
-	d.running.Wait() //nolint:errcheck // supplanted by b.err
+	d.running.Wait()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.err
@@ -354,12 +353,11 @@ func (d *deployer) startGroup(g *group) error {
 	for r := 0; r < DefaultReplication; r++ {
 		// Start the weavelet.
 		wlet := &protos.EnvelopeInfo{
-			App:           d.wlet.App,
-			DeploymentId:  d.wlet.DeploymentId,
-			Id:            uuid.New().String(),
-			Sections:      d.wlet.Sections,
-			SingleProcess: d.wlet.SingleProcess,
-			SingleMachine: d.wlet.SingleMachine,
+			App:             d.wlet.App,
+			DeploymentId:    d.wlet.DeploymentId,
+			Id:              uuid.New().String(),
+			Sections:        d.wlet.Sections,
+			InternalAddress: "localhost:0",
 		}
 		handler := &handler{
 			deployer:   d,

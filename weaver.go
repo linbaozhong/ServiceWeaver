@@ -28,6 +28,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -37,7 +38,7 @@ import (
 	"github.com/ServiceWeaver/weaver/internal/weaver"
 	"github.com/ServiceWeaver/weaver/runtime"
 	"github.com/ServiceWeaver/weaver/runtime/codegen"
-	"golang.org/x/exp/slog"
+	"go.opentelemetry.io/otel/trace"
 )
 
 //go:generate ./dev/protoc.sh internal/status/status.proto
@@ -46,6 +47,7 @@ import (
 //go:generate ./dev/protoc.sh internal/tool/ssh/impl/ssh.proto
 //go:generate ./dev/protoc.sh runtime/protos/runtime.proto
 //go:generate ./dev/protoc.sh runtime/protos/config.proto
+//go:generate ./cmd/weaver/weaver generate . ./internal/tool/multi
 //go:generate ./dev/writedeps.sh
 
 // RemoteCallError indicates that a remote component method call failed to
@@ -157,18 +159,22 @@ func runLocal[T any, _ PointerToMain[T]](ctx context.Context, app func(context.C
 	}
 
 	regs := codegen.Registered()
-	runner, err := weaver.NewSingleWeavelet(ctx, regs, opts)
+	if err := validateRegistrations(regs); err != nil {
+		return err
+	}
+
+	wlet, err := weaver.NewSingleWeavelet(ctx, regs, opts)
 	if err != nil {
 		return err
 	}
 
 	go func() {
-		if err := runner.ServeStatus(ctx); err != nil {
+		if err := wlet.ServeStatus(ctx); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}()
 
-	main, err := runner.GetImpl(reflection.Type[T]())
+	main, err := wlet.GetImpl(reflection.Type[T]())
 	if err != nil {
 		return err
 	}
@@ -177,21 +183,32 @@ func runLocal[T any, _ PointerToMain[T]](ctx context.Context, app func(context.C
 
 func runRemote[T any, _ PointerToMain[T]](ctx context.Context, app func(context.Context, *T) error, bootstrap runtime.Bootstrap) error {
 	regs := codegen.Registered()
+	if err := validateRegistrations(regs); err != nil {
+		return err
+	}
+
 	opts := weaver.RemoteWeaveletOptions{}
-	runner, err := weaver.NewRemoteWeavelet(ctx, regs, bootstrap, opts)
+	wlet, err := weaver.NewRemoteWeavelet(ctx, regs, bootstrap, opts)
 	if err != nil {
 		return err
 	}
-	if runner.Info().RunMain {
-		main, err := runner.GetImpl(reflection.Type[T]())
+
+	// Return when either (1) the remote weavelet exits, or (2) the user
+	// provided app function returns, whichever happens first.
+	errs := make(chan error, 2)
+	if wlet.Info().RunMain {
+		main, err := wlet.GetImpl(reflection.Type[T]())
 		if err != nil {
 			return err
 		}
-		return app(ctx, main.(*T))
+		go func() {
+			errs <- app(ctx, main.(*T))
+		}()
 	}
-
-	<-ctx.Done()
-	return ctx.Err()
+	go func() {
+		errs <- wlet.Wait()
+	}()
+	return <-errs
 }
 
 // Implements[T] is a type that is be embedded inside a component
@@ -223,7 +240,9 @@ type Implements[T any] struct {
 	// The component_interface_type field exists to make it possible.
 	//
 	// [1]: https://github.com/golang/go/issues/54393.
-	component_interface_type T //nolint:unused
+	//
+	//lint:ignore U1000 See comment above.
+	component_interface_type T
 
 	// We embed implementsImpl so that component implementation structs
 	// implement the Unrouted interface by default but implement the
@@ -232,8 +251,18 @@ type Implements[T any] struct {
 }
 
 // Logger returns a logger that associates its log entries with this component.
-func (i Implements[T]) Logger() *slog.Logger {
-	return i.logger
+// Log entries are labeled with any OpenTelemetry trace id and span id in the
+// provided context.
+func (i Implements[T]) Logger(ctx context.Context) *slog.Logger {
+	logger := i.logger
+	s := trace.SpanContextFromContext(ctx)
+	if s.HasTraceID() {
+		logger = logger.With("traceid", s.TraceID().String())
+	}
+	if s.HasSpanID() {
+		logger = logger.With("spanid", s.SpanID().String())
+	}
+	return logger
 }
 
 func (i *Implements[T]) setLogger(logger *slog.Logger) {
@@ -244,7 +273,7 @@ func (i *Implements[T]) setLogger(logger *slog.Logger) {
 // package. It exists so that a component struct that embeds Implements[T]
 // implements the InstanceOf[T] interface.
 //
-//nolint:unused
+//lint:ignore U1000 implements is used by InstanceOf.
 func (Implements[T]) implements(T) {}
 
 // InstanceOf[T] is the interface implemented by a struct that embeds
@@ -266,6 +295,11 @@ func (r Ref[T]) Get() T { return r.value }
 // isRef is an internal method that is only implemented by Ref[T] and is
 // used internally to check that a value is of type Ref[T].
 func (r Ref[T]) isRef() {}
+
+// setRef sets the underlying value of a Ref.
+func (r *Ref[T]) setRef(value any) {
+	r.value = value.(T)
+}
 
 // Listener is a network listener that can be placed as a field inside a
 // component implementation struct. Once placed, Service Weaver automatically
@@ -390,6 +424,11 @@ func (wc *WithConfig[T]) Config() *T {
 	return &wc.config
 }
 
+// getConfig returns the underlying config.
+func (wc *WithConfig[T]) getConfig() any {
+	return &wc.config
+}
+
 // WithRouter[T] is a type that can be embedded inside a component
 // implementation struct to indicate that calls to a method M on the component
 // must be routed according to the the value returned by T.M().
@@ -458,7 +497,7 @@ type WithRouter[T any] struct{}
 
 // routedBy(T) implements the RoutedBy[T] interface.
 //
-//nolint:unused
+//lint:ignore U1000 routedBy is used by RoutedBy and Unrouted.
 func (WithRouter[T]) routedBy(T) {}
 
 // RoutedBy[T] is the interface implemented by a struct that embeds
@@ -516,3 +555,5 @@ type AutoMarshal struct{}
 
 func (AutoMarshal) WeaverMarshal(*codegen.Encoder)   {}
 func (AutoMarshal) WeaverUnmarshal(*codegen.Decoder) {}
+
+type NotRetriable interface{}
