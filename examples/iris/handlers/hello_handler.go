@@ -3,35 +3,41 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"github.com/ServiceWeaver/weaver"
 	"github.com/ServiceWeaver/weaver/examples/iris/components/reverse"
 	"github.com/kataras/iris/v12"
 	"net/http"
 )
 
-type hello struct {
-	reverser reverse.T
+type Hello interface {
+	RegisterRouter(context.Context) error
 }
 
-func init() {
-	Instances = append(Instances, &hello{})
+type hi struct {
+	weaver.Implements[Hello]
+	reverser weaver.Ref[reverse.Reverser]
 }
 
-func (p *hello) RegisterRouter(party iris.Party, ts ...interface{}) {
-	if len(ts) == 1 {
-		p.reverser = ts[0].(reverse.T)
-	}
+//func init() {
+//	Instances = append(Instances, &hi{})
+//}
+
+func (p *hi) RegisterRouter(ctx context.Context) error {
+	party, _ := ctx.Value(V1).(iris.Party)
 
 	g := party.Party("/hello")
 	g.Get("/", p.hello)
 	g.Get("/hi", p.hi)
+
+	return nil
 }
 
-func (p *hello) hello(c iris.Context) {
+func (p *hi) hello(c iris.Context) {
 	name := c.FormValue("name")
 	if name == "" {
 		name = "World"
 	}
-	reversed, err := p.reverser.Reverse(context.Background(), name)
+	reversed, err := p.reverser.Get().Reverse(context.Background(), name)
 	if err != nil {
 		c.StopWithError(http.StatusInternalServerError, err)
 		return
@@ -40,12 +46,13 @@ func (p *hello) hello(c iris.Context) {
 	c.WriteString(fmt.Sprintf("Hello, %s!\n", reversed))
 }
 
-func (p *hello) hi(c iris.Context) {
+func (p *hi) hi(c iris.Context) {
 	name := c.FormValue("name")
 	if name == "" {
 		name = "World"
 	}
-	reversed, err := p.reverser.Reverse(context.Background(), name)
+
+	reversed, err := p.reverser.Get().Reverse(context.Background(), name)
 	if err != nil {
 		c.StopWithError(http.StatusInternalServerError, err)
 		return

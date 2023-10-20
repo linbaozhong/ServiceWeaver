@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/ServiceWeaver/weaver"
-	"github.com/ServiceWeaver/weaver/examples/httprouter/components/reverse"
 	"github.com/ServiceWeaver/weaver/examples/httprouter/handlers"
 	"github.com/julienschmidt/httprouter"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -13,8 +12,7 @@ import (
 
 type Server struct {
 	weaver.Implements[weaver.Main]
-	reverser weaver.Ref[reverse.T]
-	lis      weaver.Listener
+	lis weaver.Listener
 }
 
 func (server *Server) Main(ctx context.Context) error {
@@ -38,7 +36,7 @@ func (server *Server) InitRouter(ctx context.Context) error {
 	l := len(handlers.Instances)
 	for i := 0; i < l; i++ {
 		if m, ok := handlers.Instances[i].(handlers.IRegisterRouter); ok {
-			m.RegisterRouter(app, server.reverser.Get())
+			m.RegisterRouter(app)
 		}
 	}
 	otelHandler := otelhttp.NewHandler(app, "http")

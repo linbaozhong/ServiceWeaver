@@ -1,11 +1,5 @@
 [serviceweaver]
 binary = "./iris.exe"
 
-[listeners]
-lis = {local_address = "localhost:9000"}
-
-[gke]
-regions = ["us-west1"]
-public_listener = [
-  {name = "hello", hostname = "hello.com"},
-]
+[single]
+listeners.hello = {address = "localhost:9000"}

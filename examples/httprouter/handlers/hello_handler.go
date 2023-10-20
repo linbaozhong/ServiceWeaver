@@ -10,17 +10,15 @@ import (
 )
 
 type hello struct {
-	reverser reverse.T
 }
+
+var revers weaver.Ref[reverse.T]
 
 func init() {
 	Instances = append(Instances, &hello{})
 }
 
-func (p *hello) RegisterRouter(g *httprouter.Router, ts ...interface{}) {
-	if len(ts) == 1 {
-		p.reverser = ts[0].(reverse.T)
-	}
+func (p *hello) RegisterRouter(g *httprouter.Router) {
 
 	g.Handler(http.MethodGet, "/hello", weaver.InstrumentHandler("hello", http.HandlerFunc(p.hello)))
 	g.Handler(http.MethodGet, "/hello/hi/:name", weaver.InstrumentHandler("hello/hi", http.HandlerFunc(p.hi)))
@@ -31,7 +29,7 @@ func (p *hello) hello(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = "World"
 	}
-	reversed, err := p.reverser.Reverse(context.Background(), name)
+	reversed, err := revers.Get().Reverse(context.Background(), name)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, err)
@@ -48,7 +46,7 @@ func (p *hello) hi(w http.ResponseWriter, r *http.Request) {
 	if len(params) > 0 {
 		name = params[0].Value
 	}
-	reversed, err := p.reverser.Reverse(context.Background(), name)
+	reversed, err := revers.Get().Reverse(context.Background(), name)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, err)

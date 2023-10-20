@@ -11,7 +11,7 @@ type Server struct {
 	app weaver.Ref[routers.T]
 }
 
-func (server *Server) Main(ctx context.Context) error {
+func server(ctx context.Context, server *Server) error {
 	e := server.app.Get().InitRouter(ctx)
 	if e != nil {
 		server.Logger().Error(e.Error())

@@ -5,11 +5,11 @@ import (
 	"github.com/ServiceWeaver/weaver"
 )
 
-type T interface {
+type Reverser interface {
 	Reverse(context.Context, string) (string, error)
 }
 type reverse struct {
-	weaver.Implements[T]
+	weaver.Implements[Reverser]
 }
 
 func (r *reverse) Reverse(_ context.Context, s string) (string, error) {

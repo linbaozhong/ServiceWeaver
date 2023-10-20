@@ -3,7 +3,6 @@ package routers
 import (
 	"context"
 	"github.com/ServiceWeaver/weaver"
-	"github.com/ServiceWeaver/weaver/examples/gin/components/reverse"
 	"github.com/ServiceWeaver/weaver/examples/gin/handlers"
 	"github.com/gin-gonic/gin"
 	"net/http"
@@ -15,8 +14,7 @@ type T interface {
 
 type router struct {
 	weaver.Implements[T]
-	lis      weaver.Listener
-	reverser weaver.Ref[reverse.T]
+	lis weaver.Listener
 }
 
 func (r *router) InitRouter(ctx context.Context) error {
@@ -31,7 +29,7 @@ func (r *router) InitRouter(ctx context.Context) error {
 	l := len(handlers.Instances)
 	for i := 0; i < l; i++ {
 		if m, ok := handlers.Instances[i].(handlers.IRegisterRouter); ok {
-			m.RegisterRouter(g, r.reverser.Get())
+			m.RegisterRouter(g)
 		}
 	}
 

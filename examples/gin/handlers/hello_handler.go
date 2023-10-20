@@ -2,24 +2,22 @@ package handlers
 
 import (
 	"context"
+	"github.com/ServiceWeaver/weaver"
 	"github.com/ServiceWeaver/weaver/examples/gin/components/reverse"
 	"github.com/gin-gonic/gin"
 	"net/http"
 )
 
 type hello struct {
-	reverser reverse.T
 }
+
+var reverser weaver.Ref[reverse.T]
 
 func init() {
 	Instances = append(Instances, &hello{})
 }
 
 func (p *hello) RegisterRouter(party *gin.RouterGroup, ts ...interface{}) {
-	if len(ts) == 1 {
-		p.reverser = ts[0].(reverse.T)
-	}
-
 	g := party.Group("/hello")
 	g.GET("/", p.hello)
 	g.GET("/hi", p.hi)
@@ -30,7 +28,7 @@ func (p *hello) hello(c *gin.Context) {
 	if name == "" {
 		name = "World"
 	}
-	reversed, err := p.reverser.Reverse(context.Background(), name)
+	reversed, err := reverser.Get().Reverse(context.Background(), name)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "[ERROR]:", err)
 		return
@@ -44,7 +42,7 @@ func (p *hello) hi(c *gin.Context) {
 	if name == "" {
 		name = "World"
 	}
-	reversed, err := p.reverser.Reverse(context.Background(), name)
+	reversed, err := reverser.Get().Reverse(context.Background(), name)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "[ERROR]:", err)
 		return

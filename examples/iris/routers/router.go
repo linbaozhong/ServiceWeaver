@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/ServiceWeaver/weaver"
-	"github.com/ServiceWeaver/weaver/examples/iris/components/reverse"
 	"github.com/ServiceWeaver/weaver/examples/iris/handlers"
 	"github.com/kataras/iris/v12"
 )
@@ -14,12 +13,13 @@ type T interface {
 }
 type router struct {
 	weaver.Implements[T]
-	reverser weaver.Ref[reverse.T]
-	lis      weaver.Listener
+	hi    weaver.Ref[handlers.Hello]
+	user  weaver.Ref[handlers.User]
+	hello weaver.Listener
 }
 
 func (r *router) InitRouter(ctx context.Context) error {
-	fmt.Printf("hello listener available on %v\n", r.lis)
+	fmt.Printf("service listener available on %v\n", r.hello)
 	app := iris.New().Configure(iris.WithRemoteAddrHeader(
 		"X-Real-Ip",
 		"X-Forwarded-For",
@@ -30,14 +30,11 @@ func (r *router) InitRouter(ctx context.Context) error {
 	app.Head("/", debug)
 
 	// 注册路由 Registered route
-	l := len(handlers.Instances)
-	for i := 0; i < l; i++ {
-		if m, ok := handlers.Instances[i].(handlers.IRegisterRouter); ok {
-			m.RegisterRouter(app, r.reverser.Get())
-		}
-	}
+	v1 := context.WithValue(ctx, handlers.V1, app.Party("/v1"))
+	r.hi.Get().RegisterRouter(v1)
+	r.user.Get().RegisterRouter(v1)
 
-	e := app.Run(iris.Listener(r.lis),
+	e := app.Run(iris.Listener(r.hello),
 		iris.WithLogLevel("debug"))
 	if e != nil {
 		r.Logger().Error(e.Error())

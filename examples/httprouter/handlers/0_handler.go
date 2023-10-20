@@ -5,7 +5,7 @@ import (
 )
 
 type IRegisterRouter interface {
-	RegisterRouter(party *httprouter.Router, t ...interface{})
+	RegisterRouter(party *httprouter.Router)
 }
 
 var (
