@@ -14,7 +14,7 @@ type Server struct {
 func server(ctx context.Context, server *Server) error {
 	e := server.app.Get().InitRouter(ctx)
 	if e != nil {
-		server.Logger().Error(e.Error())
+		server.Logger(ctx).Error(e.Error())
 	}
 	return e
 }

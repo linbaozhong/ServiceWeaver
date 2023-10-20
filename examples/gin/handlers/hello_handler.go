@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"github.com/ServiceWeaver/weaver"
 	"github.com/ServiceWeaver/weaver/examples/gin/components/reverse"
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,7 @@ func (p *hello) RegisterRouter(party *gin.RouterGroup, ts ...interface{}) {
 	g := party.Group("/hello")
 	g.GET("/", p.hello)
 	g.GET("/hi", p.hi)
+	fmt.Println(1111111)
 }
 
 func (p *hello) hello(c *gin.Context) {

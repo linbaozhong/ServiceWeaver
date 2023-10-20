@@ -15,15 +15,24 @@ type Server struct {
 	lis weaver.Listener
 }
 
-func (server *Server) Main(ctx context.Context) error {
-	fmt.Printf("hello listener available on %v\n", server.lis)
-
-	e := server.InitRouter(ctx)
+func server(ctx context.Context, app *Server) error {
+	e := app.InitRouter(ctx)
 	if e != nil {
-		server.Logger().Error(e.Error())
+		app.Logger(ctx).Error(e.Error())
 	}
 	return e
 }
+
+//
+//func (server *Server) Main(ctx context.Context) error {
+//	fmt.Printf("hello listener available on %v\n", server.lis)
+//
+//	e := server.InitRouter(ctx)
+//	if e != nil {
+//		server.Logger(ctx).Error(e.Error())
+//	}
+//	return e
+//}
 
 func (server *Server) InitRouter(ctx context.Context) error {
 	app := httprouter.New()
@@ -43,7 +52,7 @@ func (server *Server) InitRouter(ctx context.Context) error {
 
 	e := http.Serve(server.lis, otelHandler)
 	if e != nil {
-		server.Logger().Error(e.Error())
+		server.Logger(ctx).Error(e.Error())
 	}
 
 	return nil

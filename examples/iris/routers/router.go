@@ -13,8 +13,6 @@ type T interface {
 }
 type router struct {
 	weaver.Implements[T]
-	hi    weaver.Ref[handlers.Hello]
-	user  weaver.Ref[handlers.User]
 	hello weaver.Listener
 }
 
@@ -30,14 +28,18 @@ func (r *router) InitRouter(ctx context.Context) error {
 	app.Head("/", debug)
 
 	// 注册路由 Registered route
-	v1 := context.WithValue(ctx, handlers.V1, app.Party("/v1"))
-	r.hi.Get().RegisterRouter(v1)
-	r.user.Get().RegisterRouter(v1)
+	v1 := app.Party("/v1")
+	l := len(handlers.Instances)
+	for i := 0; i < l; i++ {
+		if m, ok := handlers.Instances[i].(handlers.IRegisterRouter); ok {
+			m.RegisterRouter(v1)
+		}
+	}
 
 	e := app.Run(iris.Listener(r.hello),
 		iris.WithLogLevel("debug"))
 	if e != nil {
-		r.Logger().Error(e.Error())
+		r.Logger(ctx).Error(e.Error())
 	}
 
 	return nil

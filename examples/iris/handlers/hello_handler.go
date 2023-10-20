@@ -9,22 +9,15 @@ import (
 	"net/http"
 )
 
-type Hello interface {
-	RegisterRouter(context.Context) error
-}
-
 type hi struct {
-	weaver.Implements[Hello]
 	reverser weaver.Ref[reverse.Reverser]
 }
 
-//func init() {
-//	Instances = append(Instances, &hi{})
-//}
+func init() {
+	Instances = append(Instances, &hi{})
+}
 
-func (p *hi) RegisterRouter(ctx context.Context) error {
-	party, _ := ctx.Value(V1).(iris.Party)
-
+func (p *hi) RegisterRouter(party iris.Party) error {
 	g := party.Party("/hello")
 	g.Get("/", p.hello)
 	g.Get("/hi", p.hi)

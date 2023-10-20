@@ -35,7 +35,7 @@ func (r *router) InitRouter(ctx context.Context) error {
 
 	e := app.RunListener(r.lis)
 	if e != nil {
-		r.Logger().Error(e.Error())
+		r.Logger(ctx).Error(e.Error())
 	}
 
 	return nil
