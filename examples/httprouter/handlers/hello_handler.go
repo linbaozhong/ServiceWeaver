@@ -2,9 +2,9 @@ package handlers
 
 import (
 	"context"
+	"examples/httprouter/components/reverse"
 	"fmt"
 	"github.com/ServiceWeaver/weaver"
-	"github.com/ServiceWeaver/weaver/examples/httprouter/components/reverse"
 	"github.com/julienschmidt/httprouter"
 	"net/http"
 )

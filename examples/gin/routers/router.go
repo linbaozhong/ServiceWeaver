@@ -2,8 +2,8 @@ package routers
 
 import (
 	"context"
+	"examples/gin/handlers"
 	"github.com/ServiceWeaver/weaver"
-	"github.com/ServiceWeaver/weaver/examples/gin/handlers"
 	"github.com/gin-gonic/gin"
 	"net/http"
 )

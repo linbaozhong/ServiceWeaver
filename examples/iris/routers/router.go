@@ -2,9 +2,9 @@ package routers
 
 import (
 	"context"
+	"examples/iris/handlers"
 	"fmt"
 	"github.com/ServiceWeaver/weaver"
-	"github.com/ServiceWeaver/weaver/examples/iris/handlers"
 	"github.com/kataras/iris/v12"
 )
 

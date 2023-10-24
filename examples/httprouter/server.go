@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"examples/httprouter/handlers"
 	"fmt"
 	"github.com/ServiceWeaver/weaver"
-	"github.com/ServiceWeaver/weaver/examples/httprouter/handlers"
 	"github.com/julienschmidt/httprouter"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"net/http"
@@ -22,17 +22,6 @@ func server(ctx context.Context, app *Server) error {
 	}
 	return e
 }
-
-//
-//func (server *Server) Main(ctx context.Context) error {
-//	fmt.Printf("hello listener available on %v\n", server.lis)
-//
-//	e := server.InitRouter(ctx)
-//	if e != nil {
-//		server.Logger(ctx).Error(e.Error())
-//	}
-//	return e
-//}
 
 func (server *Server) InitRouter(ctx context.Context) error {
 	app := httprouter.New()

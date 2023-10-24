@@ -8,6 +8,7 @@ import (
 type Reverser interface {
 	Reverse(context.Context, string) (string, error)
 }
+
 type reverse struct {
 	weaver.Implements[Reverser]
 }

@@ -15,12 +15,12 @@ package main
 
 import (
 	"context"
+	"examples/gin/components/reverse"
 	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/ServiceWeaver/weaver"
-	"github.com/ServiceWeaver/weaver/examples/hello/components/reverse"
 )
 
 func main() {

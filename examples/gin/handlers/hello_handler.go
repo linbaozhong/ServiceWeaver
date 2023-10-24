@@ -2,9 +2,8 @@ package handlers
 
 import (
 	"context"
-	"fmt"
+	"examples/gin/components/reverse"
 	"github.com/ServiceWeaver/weaver"
-	"github.com/ServiceWeaver/weaver/examples/gin/components/reverse"
 	"github.com/gin-gonic/gin"
 	"net/http"
 )
@@ -18,11 +17,10 @@ func init() {
 	Instances = append(Instances, &hello{})
 }
 
-func (p *hello) RegisterRouter(party *gin.RouterGroup, ts ...interface{}) {
+func (p *hello) RegisterRouter(party *gin.RouterGroup) {
 	g := party.Group("/hello")
 	g.GET("/", p.hello)
 	g.GET("/hi", p.hi)
-	fmt.Println(1111111)
 }
 
 func (p *hello) hello(c *gin.Context) {
