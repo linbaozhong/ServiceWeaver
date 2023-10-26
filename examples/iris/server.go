@@ -16,11 +16,12 @@ type Server struct {
 }
 
 func run(ctx context.Context, server *Server) error {
-	e := server.Init(ctx)
-	if e != nil {
-		server.Logger(ctx).Error(e.Error())
-	}
-	return e
+	//e := server.Init(ctx)
+	//if e != nil {
+	//	server.Logger(ctx).Error(e.Error())
+	//}
+	//return e
+	return nil
 }
 
 func (p *Server) Init(ctx context.Context) error {
@@ -40,15 +41,6 @@ func (p *Server) Init(ctx context.Context) error {
 
 	p.h.Get().RegisterRouter(appCtx)
 	p.u.Get().RegisterRouter(appCtx)
-
-	//l := len(handlers.Instances)
-	//for i := 0; i < l; i++ {
-	//	if m, ok := handlers.Instances[i].(handlers.IRegisterRouter); ok {
-	//		m.RegisterRouter(appCtx)
-	//	} else {
-	//		fmt.Println("hello:", m)
-	//	}
-	//}
 
 	e := app.Run(iris.Listener(p.hello),
 		iris.WithLogLevel("debug"))

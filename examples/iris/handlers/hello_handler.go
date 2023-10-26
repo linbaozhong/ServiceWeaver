@@ -19,7 +19,10 @@ type hello struct {
 }
 
 func (p *hello) RegisterRouter(ctx context.Context) error {
-	party := ctx.Value("party").(iris.Party)
+	party, ok := ctx.Value("party").(iris.Party)
+	if !ok {
+		return nil
+	}
 
 	g := party.Party("/hello")
 	g.Get("/", p.hello)

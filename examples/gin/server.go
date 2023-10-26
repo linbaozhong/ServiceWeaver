@@ -17,16 +17,17 @@ type Server struct {
 }
 
 func run(ctx context.Context, server *Server) error {
-	e := server.Init(ctx)
-	if e != nil {
-		server.Logger(ctx).Error(e.Error())
-	}
-	return e
+	//e := server.Init(ctx)
+	//if e != nil {
+	//	server.Logger(ctx).Error(e.Error())
+	//}
+	//return e
+	return nil
 }
 
 func (p *Server) Init(ctx context.Context) error {
 	app := gin.Default()
-
+	app.SetTrustedProxies([]string{"127.0.0.1"})
 	// 调试服务 Prepare for commissioning services
 	app.GET("/", debug)
 	app.HEAD("/", debug)

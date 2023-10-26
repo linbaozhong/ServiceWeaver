@@ -15,7 +15,10 @@ type user struct {
 }
 
 func (p *user) RegisterRouter(ctx context.Context) error {
-	party := ctx.Value("party").(iris.Party)
+	party, ok := ctx.Value("party").(iris.Party)
+	if !ok {
+		return nil
+	}
 
 	g := party.Party("/user")
 	g.Get("/", p.get)
