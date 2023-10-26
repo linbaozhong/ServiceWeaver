@@ -3,12 +3,3 @@ binary = "./gin.exe"
 
 [single]
 listeners.hello = {address = "localhost:9000"}
-
-#[listeners]
-#hello = {local_address = "localhost:9000"}
-
-[gke]
-regions = ["us-west1"]
-public_listener = [
-  {name = "hello", hostname = "hello.com"},
-]
