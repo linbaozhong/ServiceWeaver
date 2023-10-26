@@ -23,7 +23,7 @@ import (
 
 func main() {
 	// 启动应用程序，例如 HTTP 服务等
-	e := weaver.Run(context.Background(), server)
+	e := weaver.Run(context.Background(), run)
 	if e != nil {
 		log.Fatal(e)
 	}

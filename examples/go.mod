@@ -2,8 +2,6 @@ module examples
 
 go 1.21
 
-toolchain go1.21.0
-
 require (
 	github.com/ServiceWeaver/weaver v0.22.0
 	github.com/gin-gonic/gin v1.9.1

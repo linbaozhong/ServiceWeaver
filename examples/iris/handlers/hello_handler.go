@@ -9,15 +9,18 @@ import (
 	"net/http"
 )
 
-type hi struct {
+type IHello interface {
+	RegisterRouter(ctx context.Context) error
+}
+
+type hello struct {
+	weaver.Implements[IHello]
 	reverser weaver.Ref[reverse.Reverser]
 }
 
-func init() {
-	Instances = append(Instances, &hi{})
-}
+func (p *hello) RegisterRouter(ctx context.Context) error {
+	party := ctx.Value("party").(iris.Party)
 
-func (p *hi) RegisterRouter(party iris.Party) error {
 	g := party.Party("/hello")
 	g.Get("/", p.hello)
 	g.Get("/hi", p.hi)
@@ -25,7 +28,7 @@ func (p *hi) RegisterRouter(party iris.Party) error {
 	return nil
 }
 
-func (p *hi) hello(c iris.Context) {
+func (p *hello) hello(c iris.Context) {
 	name := c.FormValue("name")
 	if name == "" {
 		name = "World"
@@ -39,7 +42,7 @@ func (p *hi) hello(c iris.Context) {
 	c.WriteString(fmt.Sprintf("Hello, %s!\n", reversed))
 }
 
-func (p *hi) hi(c iris.Context) {
+func (p *hello) hi(c iris.Context) {
 	name := c.FormValue("name")
 	if name == "" {
 		name = "World"

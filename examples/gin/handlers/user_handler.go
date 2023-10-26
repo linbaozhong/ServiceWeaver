@@ -3,7 +3,8 @@ package handlers
 import (
 	"context"
 	"github.com/ServiceWeaver/weaver"
-	"github.com/kataras/iris/v12"
+	"github.com/gin-gonic/gin"
+	"net/http"
 )
 
 type IUser interface {
@@ -15,14 +16,14 @@ type user struct {
 }
 
 func (p *user) RegisterRouter(ctx context.Context) error {
-	party := ctx.Value("party").(iris.Party)
+	party := ctx.Value("party").(*gin.RouterGroup)
 
-	g := party.Party("/user")
-	g.Get("/", p.get)
+	g := party.Group("/user")
+	g.GET("/", p.get)
 
 	return nil
 }
 
-func (p *user) get(c iris.Context) {
-	c.WriteString("user OK !!!")
+func (p *user) get(c *gin.Context) {
+	c.String(http.StatusOK, "user OK !!!")
 }

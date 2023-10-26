@@ -8,19 +8,23 @@ import (
 	"net/http"
 )
 
+type IHello interface {
+	RegisterRouter(ctx context.Context) error
+}
+
 type hello struct {
+	weaver.Implements[IHello]
+	reverser weaver.Ref[reverse.T]
 }
 
-var reverser weaver.Ref[reverse.T]
+func (p *hello) RegisterRouter(ctx context.Context) error {
+	party := ctx.Value("party").(*gin.RouterGroup)
 
-func init() {
-	Instances = append(Instances, &hello{})
-}
-
-func (p *hello) RegisterRouter(party *gin.RouterGroup) {
 	g := party.Group("/hello")
 	g.GET("/", p.hello)
 	g.GET("/hi", p.hi)
+
+	return nil
 }
 
 func (p *hello) hello(c *gin.Context) {
@@ -28,7 +32,7 @@ func (p *hello) hello(c *gin.Context) {
 	if name == "" {
 		name = "World"
 	}
-	reversed, err := reverser.Get().Reverse(context.Background(), name)
+	reversed, err := p.reverser.Get().Reverse(context.Background(), name)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "[ERROR]:", err)
 		return
@@ -42,7 +46,7 @@ func (p *hello) hi(c *gin.Context) {
 	if name == "" {
 		name = "World"
 	}
-	reversed, err := reverser.Get().Reverse(context.Background(), name)
+	reversed, err := p.reverser.Get().Reverse(context.Background(), name)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "[ERROR]:", err)
 		return
