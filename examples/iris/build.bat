@@ -1,0 +1,3 @@
+weaver generate ./...
+go build
+weaver multi deploy weaver.toml

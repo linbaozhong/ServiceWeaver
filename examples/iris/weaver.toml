@@ -1,8 +1,8 @@
 [serviceweaver]
 binary = "./iris.exe"
 
-[single]
-listeners.hello = {address = "localhost:9000"}
+#[single]
+#listeners.hello = {address = "localhost:9000"}
 
 [multi]
 listeners.hello = {address = "localhost:9000"}

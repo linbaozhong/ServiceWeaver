@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"github.com/ServiceWeaver/weaver"
+	"iris/gateways"
 	"log"
 )
 
@@ -23,7 +24,7 @@ import (
 
 func main() {
 	// 启动应用程序，例如 HTTP 服务等
-	e := weaver.Run(context.Background(), run)
+	e := weaver.Run(context.Background(), gateways.Run)
 	if e != nil {
 		log.Fatal(e)
 	}
