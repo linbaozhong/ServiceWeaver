@@ -2,33 +2,43 @@ package gateways
 
 import (
 	"context"
+	"fmt"
 	"github.com/ServiceWeaver/weaver"
-	"github.com/kataras/iris/v12"
-	"iris/components/reverse"
+	"iris/gateways/company"
+	"iris/gateways/user"
+	"os"
+	"os/signal"
 )
 
 type Server struct {
 	weaver.Implements[weaver.Main]
-	hello    weaver.Listener
-	reverser weaver.Ref[reverse.Reverser]
+	user    weaver.Ref[user.Server]
+	company weaver.Ref[company.Server]
 }
 
 func Run(ctx context.Context, server *Server) error {
-	if e := server.start(ctx); e != nil {
-		server.Logger(ctx).Error(e.Error())
-		return e
-	}
+	server.start(ctx)
 	return nil
 }
 
-func (p *Server) start(ctx context.Context) error {
-	Hello.Register()
+func (p *Server) start(ctx context.Context) {
+	sigs := make(chan os.Signal, 1)
+	done := make(chan bool)
 
-	e := App().Run(iris.Listener(p.hello),
-		iris.WithLogLevel("debug"))
-	if e != nil {
-		p.Logger(ctx).Error(e.Error())
-	}
+	signal.Notify(sigs, os.Interrupt, os.Kill)
 
-	return nil
+	go func() {
+		go p.user.Get().Run(ctx)
+		go p.company.Get().Run(ctx)
+
+		<-sigs
+
+		p.user.Get().Shutdown(ctx)
+		p.company.Get().Shutdown(ctx)
+
+		close(done)
+	}()
+	//优雅地关闭
+	<-done
+	fmt.Println("closed...")
 }
