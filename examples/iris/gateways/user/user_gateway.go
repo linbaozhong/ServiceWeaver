@@ -4,34 +4,22 @@ import (
 	"context"
 	"fmt"
 	"github.com/kataras/iris/v12"
-	"iris/components/reverse"
 	"net/http"
 )
 
-type user struct {
-	reverser reverse.Reverser
+func (p *server) RegisterUser(party iris.Party) {
+	g := party.Party("/user")
+
+	g.Get("/hello", p.hello)
+	g.Get("/hi", p.hi)
 }
 
-var User user
-
-func (p *user) Register(args ...interface{}) {
-	for _, arg := range args {
-		switch i := arg.(type) {
-		case reverse.Reverser:
-			p.reverser = i
-		}
-	}
-
-	app.Get("/v1/"+name, User.hello)
-	app.Get("/v1/"+name+"/hi", User.hi)
-}
-
-func (p *user) hello(c iris.Context) {
+func (p *server) hello(c iris.Context) {
 	name := c.FormValue("name")
 	if name == "" {
 		name = "World"
 	}
-	reversed, err := p.reverser.Reverse(context.Background(), name)
+	reversed, err := p.Reverser.Get().Reverse(context.Background(), name)
 	if err != nil {
 		c.StopWithError(http.StatusInternalServerError, err)
 		return
@@ -40,13 +28,13 @@ func (p *user) hello(c iris.Context) {
 	c.WriteString(fmt.Sprintf("Hello, %s!\n", reversed))
 }
 
-func (p *user) hi(c iris.Context) {
+func (p *server) hi(c iris.Context) {
 	name := c.FormValue("name")
 	if name == "" {
 		name = "World"
 	}
 
-	reversed, err := p.reverser.Reverse(context.Background(), name)
+	reversed, err := p.Reverser.Get().Reverse(context.Background(), name)
 	if err != nil {
 		c.StopWithError(http.StatusInternalServerError, err)
 		return

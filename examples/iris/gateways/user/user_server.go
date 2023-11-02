@@ -34,7 +34,9 @@ func (p *server) Init(ctx context.Context) error {
 }
 
 func (p *server) Run(ctx context.Context) error {
-	User.Register(p.Reverser.Get())
+	v1 := app.Party("/v1")
+	p.RegisterUserinfo(v1)
+	p.RegisterUser(v1)
 
 	e := app.Run(iris.Listener(p.user),
 		iris.WithLogLevel("debug"))

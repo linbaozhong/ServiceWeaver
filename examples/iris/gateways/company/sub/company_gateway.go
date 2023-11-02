@@ -1,4 +1,4 @@
-package company
+package sub
 
 import (
 	"context"
@@ -16,16 +16,16 @@ var (
 	User user
 )
 
-func (p *user) Register(args ...interface{}) {
+func (p *user) Register(party iris.Party, args ...any) {
 	for _, arg := range args {
 		switch i := arg.(type) {
 		case reverse.Reverser:
 			p.reverser = i
 		}
 	}
-
-	app.Get("/v1/"+name, User.hello)
-	app.Get("/v1/"+name+"/hi", User.hi)
+	g := party.Party("/company")
+	g.Get("/", User.hello)
+	g.Get("/hi", User.hi)
 }
 
 func (p *user) hello(c iris.Context) {

@@ -6,11 +6,12 @@ import (
 	"github.com/ServiceWeaver/weaver"
 	"github.com/kataras/iris/v12"
 	"iris/components/reverse"
+	"iris/gateways/company/sub"
 	"iris/routers"
 )
 
 var (
-	app  *iris.Application
+	App  *iris.Application
 	name string = "company"
 )
 
@@ -28,15 +29,17 @@ type server struct {
 
 func (p *server) Init(ctx context.Context) error {
 	a := routers.NewApp(name)
-	app = a.Application()
+	App = a.Application()
 
 	return nil
 }
 
 func (p *server) Run(ctx context.Context) error {
-	User.Register(p.Reverser.Get())
+	v1 := App.Party("/v1")
 
-	e := app.Run(iris.Listener(p.company),
+	sub.User.Register(v1, p.Reverser.Get())
+
+	e := App.Run(iris.Listener(p.company),
 		iris.WithLogLevel("debug"))
 	if e != nil {
 		p.Logger(ctx).Error(e.Error())
@@ -47,7 +50,7 @@ func (p *server) Run(ctx context.Context) error {
 
 func (p *server) Shutdown(ctx context.Context) error {
 	fmt.Println("已关闭：", name)
-	return app.Shutdown(ctx)
+	return App.Shutdown(ctx)
 }
 
 func (p *server) GetReverser() reverse.Reverser {
