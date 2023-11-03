@@ -23,7 +23,7 @@ type server struct {
 	weaver.Implements[Server]
 	user weaver.Listener
 
-	Reverser weaver.Ref[reverse.Reverser]
+	reverser weaver.Ref[reverse.Reverser]
 }
 
 func (p *server) Init(ctx context.Context) error {

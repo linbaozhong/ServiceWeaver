@@ -28,13 +28,13 @@ func (p *Server) start(ctx context.Context) {
 	signal.Notify(sigs, os.Interrupt, os.Kill)
 
 	go func() {
-		go p.user.Get().Run(ctx)
-		go p.company.Get().Run(ctx)
+		go p.user.Get().Run(context.Background())
+		go p.company.Get().Run(context.Background())
 
 		<-sigs
 
-		p.user.Get().Shutdown(ctx)
-		p.company.Get().Shutdown(ctx)
+		p.user.Get().Shutdown(context.Background())
+		p.company.Get().Shutdown(context.Background())
 
 		close(done)
 	}()

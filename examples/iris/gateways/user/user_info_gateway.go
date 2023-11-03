@@ -9,11 +9,11 @@ import (
 func (p *server) RegisterUserinfo(party iris.Party) {
 	g := party.Party("/userinfo")
 
-	g.Get("/get", p.getUserInfo)
+	g.Get("/get", p.userinfoGet)
 }
 
-func (p *server) getUserInfo(c iris.Context) {
-	reversed, err := p.Reverser.Get().Reverse(c, "userinfo")
+func (p *server) userinfoGet(c iris.Context) {
+	reversed, err := p.reverser.Get().Reverse(c, "userinfo")
 	if err != nil {
 		c.StopWithError(http.StatusInternalServerError, err)
 		return

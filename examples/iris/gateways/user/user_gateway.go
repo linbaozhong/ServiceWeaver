@@ -19,7 +19,7 @@ func (p *server) hello(c iris.Context) {
 	if name == "" {
 		name = "World"
 	}
-	reversed, err := p.Reverser.Get().Reverse(context.Background(), name)
+	reversed, err := p.reverser.Get().Reverse(context.Background(), name)
 	if err != nil {
 		c.StopWithError(http.StatusInternalServerError, err)
 		return
@@ -34,7 +34,7 @@ func (p *server) hi(c iris.Context) {
 		name = "World"
 	}
 
-	reversed, err := p.Reverser.Get().Reverse(context.Background(), name)
+	reversed, err := p.reverser.Get().Reverse(context.Background(), name)
 	if err != nil {
 		c.StopWithError(http.StatusInternalServerError, err)
 		return
