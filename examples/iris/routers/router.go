@@ -5,6 +5,10 @@ import (
 	"github.com/kataras/iris/v12"
 )
 
+type IRegisterRouter interface {
+	RegisterRouter(party iris.Party, args ...any)
+}
+
 type app struct {
 	name        string
 	application *iris.Application

@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/ServiceWeaver/weaver"
 	"iris/gateways"
 	"log"
@@ -28,4 +29,5 @@ func main() {
 	if e != nil {
 		log.Fatal(e)
 	}
+	fmt.Println("------------------")
 }

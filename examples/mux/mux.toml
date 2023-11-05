@@ -1,0 +1,5 @@
+[serviceweaver]
+binary = "./mux.exe"
+
+[single]
+listeners.lis = {address = "localhost:9000"}

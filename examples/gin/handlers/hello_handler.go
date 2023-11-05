@@ -17,8 +17,11 @@ type hello struct {
 	reverser weaver.Ref[reverse.T]
 }
 
-func (p *hello) RegisterRouter(ctx context.Context) error {
-	party := ctx.Value("party").(*gin.RouterGroup)
+var reverser weaver.Ref[reverse.T]
+
+func init() {
+	Instances = append(Instances, &hello{})
+}
 
 	g := party.Group("/hello")
 	g.GET("/", p.hello)

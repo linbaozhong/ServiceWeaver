@@ -8,27 +8,27 @@ import (
 	"net/http"
 )
 
-type user struct {
+type company struct {
 	reverser reverse.Reverser
 }
 
 var (
-	User user
+	Company company
 )
 
-func (p *user) Register(party iris.Party, args ...any) {
+func (p *company) RegisterRouter(party iris.Party, args ...any) {
 	for _, arg := range args {
-		switch i := arg.(type) {
+		switch a := arg.(type) {
 		case reverse.Reverser:
-			p.reverser = i
+			p.reverser = a
 		}
 	}
 	g := party.Party("/company")
-	g.Get("/", User.hello)
-	g.Get("/hi", User.hi)
+	g.Get("/", Company.hello)
+	g.Get("/hi", Company.hi)
 }
 
-func (p *user) hello(c iris.Context) {
+func (p *company) hello(c iris.Context) {
 	name := c.FormValue("name")
 	if name == "" {
 		name = "World"
@@ -42,7 +42,7 @@ func (p *user) hello(c iris.Context) {
 	c.WriteString(fmt.Sprintf("Hello, %s!\n", reversed))
 }
 
-func (p *user) hi(c iris.Context) {
+func (p *company) hi(c iris.Context) {
 	name := c.FormValue("name")
 	if name == "" {
 		name = "World"

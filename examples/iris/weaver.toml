@@ -2,9 +2,9 @@
 binary = "./iris.exe"
 
 [single]
-listeners.user = {address = "localhost:9001"}
-listeners.company = {address = "localhost:9002"}
+listeners.lisUser = {address = "localhost:9001"}
+listeners.lisCompany = {address = "localhost:9002"}
 
 [multi]
-listeners.user = {address = "localhost:9001"}
-listeners.company = {address = "localhost:9002"}
+listeners.lisUser = {address = "localhost:9001"}
+listeners.lisCompany = {address = "localhost:9002"}

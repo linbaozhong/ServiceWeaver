@@ -2,43 +2,110 @@ package gateways
 
 import (
 	"context"
-	"fmt"
 	"github.com/ServiceWeaver/weaver"
+	"github.com/kataras/iris/v12"
+	"iris/components/reverse"
 	"iris/gateways/company"
 	"iris/gateways/user"
+	"iris/routers"
 	"os"
 	"os/signal"
+	"syscall"
+	"time"
+)
+
+var (
+	companyApp = routers.NewApp("company")
+	userApp    = routers.NewApp("user")
 )
 
 type Server struct {
 	weaver.Implements[weaver.Main]
-	user    weaver.Ref[user.Server]
-	company weaver.Ref[company.Server]
+	lisCompany weaver.Listener
+	lisUser    weaver.Listener
+
+	Reverser weaver.Ref[reverse.Reverser]
 }
 
 func Run(ctx context.Context, server *Server) error {
-	server.start(ctx)
 	return nil
 }
 
-func (p *Server) start(ctx context.Context) {
-	sigs := make(chan os.Signal, 1)
-	done := make(chan bool)
+func (p *Server) Init(ctx context.Context) error {
+	_ctx, cancel := context.WithCancel(ctx)
 
-	signal.Notify(sigs, os.Interrupt, os.Kill)
+	sigs := make(chan os.Signal, 1)
+	done := make(chan struct{})
+
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGKILL, syscall.SIGTERM)
 
 	go func() {
-		go p.user.Get().Run(context.Background())
-		go p.company.Get().Run(context.Background())
-
 		<-sigs
-
-		p.user.Get().Shutdown(context.Background())
-		p.company.Get().Shutdown(context.Background())
+		cancel()
 
 		close(done)
 	}()
-	//优雅地关闭
+
+	go p.serveCompany(_ctx)
+	go p.serveUser(_ctx)
+
+	//
 	<-done
-	fmt.Println("closed...")
+	return nil
+}
+
+func (p *Server) serveCompany(ctx context.Context) error {
+	go func(ctx2 context.Context) {
+		for {
+			select {
+			case <-ctx2.Done():
+				timeout := 5 * time.Second
+				_ctx, cancel := context.WithTimeout(context.Background(), timeout)
+				defer cancel()
+
+				companyApp.Application().Shutdown(_ctx)
+			default:
+
+			}
+		}
+	}(ctx)
+
+	v1 := companyApp.Application().Party("/v1")
+	company.Server.Register(v1, p.Reverser.Get())
+
+	e := companyApp.Application().Run(iris.Listener(p.lisCompany),
+		iris.WithLogLevel("debug"))
+	if e != nil {
+		p.Logger(ctx).Error(e.Error())
+	}
+
+	return nil
+}
+
+func (p *Server) serveUser(ctx context.Context) error {
+	go func(ctx2 context.Context) {
+		for {
+			select {
+			case <-ctx2.Done():
+				timeout := 5 * time.Second
+				_ctx, cancel := context.WithTimeout(context.Background(), timeout)
+				defer cancel()
+
+				userApp.Application().Shutdown(_ctx)
+			default:
+
+			}
+		}
+	}(ctx)
+
+	v1 := userApp.Application().Party("/v1")
+	user.Server.Register(v1, p.Reverser.Get())
+
+	e := userApp.Application().Run(iris.Listener(p.lisUser),
+		iris.WithLogLevel("debug"))
+	if e != nil {
+		p.Logger(ctx).Error(e.Error())
+	}
+
+	return nil
 }
